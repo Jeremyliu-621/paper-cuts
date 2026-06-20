@@ -635,6 +635,21 @@
     }
     return y === null ? null : { y, tilt };
   }
+  // a point at `frac` (0..1) of arc length ALONG a contour, with the local tilt — used to anchor a
+  // pillar to a real point on the underside (so its top always lands on the platform, even a steep
+  // or curved end, instead of being guessed from an x that the offset contour may not even span).
+  function contourPt(contour, frac) {
+    const n = contour.length;
+    if (n < 2) return { x: contour[0][0], y: contour[0][1], tilt: 0 };
+    const seg = []; let total = 0;
+    for (let i = 1; i < n; i++) { const d = Math.hypot(contour[i][0] - contour[i - 1][0], contour[i][1] - contour[i - 1][1]); seg.push(d); total += d; }
+    let target = Math.max(0, Math.min(1, frac)) * total, i = 0;
+    while (i < seg.length - 1 && target > seg[i]) { target -= seg[i]; i++; }
+    const a = contour[i], b = contour[i + 1], t = seg[i] > 1e-6 ? target / seg[i] : 0;
+    let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+    return { x: a[0] + (b[0] - a[0]) * t, y: a[1] + (b[1] - a[1]) * t, tilt: ang };
+  }
   // sample the underside across x0..x1 into a short polyline (used as an island's upper edge)
   function undersideStrip(contour, x0, x1) {
     const steps = Math.max(2, Math.round(Math.abs(x1 - x0) / 44)), out = [], y0 = contour[0][1];
@@ -670,17 +685,18 @@
           addHang(front, contour, p.x + p.w * 0.28, p.x + p.w * 0.72, density, seed + 2);
         } else {
           const l = Math.max(p.x, sp.l), r = Math.min(pr, sp.r), span = r - l;
-          // pillars near the ends of the supported span (one if narrow); each rises to the slanted
-          // underside above it (so a tilted platform gets uneven-length, angle-capped supports).
-          const inset = Math.min(50, span * 0.24);
-          const xs = span < 150 ? [(l + r) / 2] : [l + inset, r - inset];
-          if (span > 560 && density >= 1) xs.splice(1, 0, (l + r) / 2);
-          for (let i = 0; i < xs.length; i++) {
-            const x = xs[i], u = undersideAt(contour, x), topY = u ? u.y : pb, tilt = u ? u.tilt : 0;
-            const sup = surfaceBelow(plats, x, topY + 2, p);
-            if (sup && sup.y - topY > GAP_MIN && sup.y - topY < PILLAR_MAX) {
-              behind.push({ t: 'pillar', x, topY, botY: sup.y, tilt, botTilt: sup.tilt, thin: !!p.pass, seed: seed + 10 + i * 7 });
-              if (density >= 0.5 && i < 2) front.push({ t: 'plant', x, y: sup.y, tilt: sup.tilt, kind: pick(DS.makeRng(seed + 20 + i), TOP_KINDS), s: 0.78, seed: seed + 20 + i });
+          // pillars anchored to points sampled ALONG the underside contour (near each end, + middle
+          // when wide), so a support's top always lands ON the platform — even at a steep/curved end
+          // — then drops vertically to the surface beneath that anchor. Anchors over open air (an
+          // overhang) find no surface and are skipped; the island edge below covers them instead.
+          const fracs = span < 150 ? [0.5] : [0.13, 0.87];
+          if (span > 560 && density >= 1) fracs.splice(1, 0, 0.5);
+          for (let i = 0; i < fracs.length; i++) {
+            const a = contourPt(contour, fracs[i]);
+            const sup = surfaceBelow(plats, a.x, a.y + 2, p);
+            if (sup && sup.y - a.y > GAP_MIN && sup.y - a.y < PILLAR_MAX) {
+              behind.push({ t: 'pillar', x: a.x, topY: a.y, botY: sup.y, tilt: a.tilt, botTilt: sup.tilt, thin: !!p.pass, seed: seed + 10 + i * 7 });
+              if (density >= 0.5 && i < 2) front.push({ t: 'plant', x: a.x, y: sup.y, tilt: sup.tilt, kind: pick(DS.makeRng(seed + 20 + i), TOP_KINDS), s: 0.78, seed: seed + 20 + i });
             }
           }
           // overhangs → a jagged island edge (and foliage) on each jutting side, following the underside
