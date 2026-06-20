@@ -8,14 +8,14 @@ import {
   renderPlaintextFromRichText,
   toRichText,
 } from 'tldraw'
+import '../../js/stageReferenceData.js'
 
 const DEFAULT_BACKEND_PORT = '8000'
-const DEFAULT_GAME_PORT = '8080'
-const DEFAULT_GAME_PATH = '/#play'
 const SYNC_DEBOUNCE_MS = 120
 const RECONNECT_DELAY_MS = 1000
 const GAME_FRAME = { x: 0, y: 0, w: 1920, h: 1080 }
 const FRAME_SHAPE_ID = createShapeId('magicboard-stage-frame')
+const STAGE_REFERENCE = globalThis.DS?.stageReference || { view: { w: GAME_FRAME.w, h: GAME_FRAME.h }, platforms: [] }
 
 const SIZE_TO_WIDTH = {
   s: 3,
@@ -43,19 +43,6 @@ function getRoomId() {
   const params = new URLSearchParams(window.location.search)
   const room = params.get('room')?.trim()
   return room || 'demo'
-}
-
-function getGameUrl() {
-  const params = new URLSearchParams(window.location.search)
-  const configuredUrl = params.get('game') || import.meta.env.VITE_GAME_URL
-  if (configuredUrl) return configuredUrl
-
-  const url = new URL(window.location.href)
-  url.port = DEFAULT_GAME_PORT
-  url.pathname = '/'
-  url.search = ''
-  url.hash = DEFAULT_GAME_PATH.slice(1)
-  return url.toString()
 }
 
 function getBackendUrl() {
@@ -228,7 +215,7 @@ function ensureStageFrame(editor) {
           font: 'draw',
           align: 'middle',
           verticalAlign: 'middle',
-          richText: toRichText('Doodle Smash game frame 1920 x 1080'),
+          richText: toRichText(''),
           labelColor: 'orange',
           url: '',
           growY: 0,
@@ -241,21 +228,68 @@ function ensureStageFrame(editor) {
   editor.setCurrentTool('draw')
 }
 
-function GameSceneLayer({ gameUrl, onSceneLoad }) {
+function platformClassName(platform) {
+  const kind = platform.kind || (platform.pass ? 'float' : 'ground')
+  return `reference-platform reference-platform-${kind}${platform.pass ? ' reference-platform-pass' : ''}`
+}
+
+function PlatformReferenceLayer() {
+  const view = STAGE_REFERENCE.view || { w: GAME_FRAME.w, h: GAME_FRAME.h }
+  const platforms = STAGE_REFERENCE.platforms || []
+
   return (
-    <iframe
-      className="game-scene-frame"
-      src={gameUrl}
-      title="Doodle Smash scene reference"
+    <div
+      className="platform-reference-frame"
+      data-testid="static-platform-reference"
       aria-hidden="true"
-      onLoad={onSceneLoad}
-    />
+    >
+      <svg
+        className="platform-reference-svg"
+        viewBox={`0 0 ${view.w} ${view.h}`}
+        width={view.w}
+        height={view.h}
+        focusable="false"
+      >
+        <rect className="reference-view-fill" x="0" y="0" width={view.w} height={view.h} />
+        {platforms.map((platform, index) => {
+          const radius = Math.min(platform.h / 2, platform.pass ? 16 : 20)
+          return (
+            <g key={`${platform.x}-${platform.y}-${platform.w}-${platform.h}-${index}`}>
+              <rect
+                className="reference-platform-shadow"
+                x={platform.x + 9}
+                y={platform.y + 12}
+                width={platform.w}
+                height={platform.h}
+                rx={radius}
+                ry={radius}
+              />
+              <rect
+                className={platformClassName(platform)}
+                x={platform.x}
+                y={platform.y}
+                width={platform.w}
+                height={platform.h}
+                rx={radius}
+                ry={radius}
+              />
+              <line
+                className="reference-platform-topline"
+                x1={platform.x + radius}
+                y1={platform.y + Math.min(16, platform.h / 2)}
+                x2={platform.x + platform.w - radius}
+                y2={platform.y + Math.min(16, platform.h / 2)}
+              />
+            </g>
+          )
+        })}
+      </svg>
+    </div>
   )
 }
 
 export default function App() {
   const roomId = useMemo(getRoomId, [])
-  const gameUrl = useMemo(getGameUrl, [])
   const backendUrl = useMemo(
     () => normalizeBackendUrl(getBackendUrl()),
     [],
@@ -283,13 +317,12 @@ export default function App() {
   const [roomVersion, setRoomVersion] = useState(0)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
   const [projectionCount, setProjectionCount] = useState(0)
-  const [sceneStatus, setSceneStatus] = useState('loading')
   const [error, setError] = useState('')
   const tldrawComponents = useMemo(
     () => ({
-      OnTheCanvas: () => <GameSceneLayer gameUrl={gameUrl} onSceneLoad={() => setSceneStatus('loaded')} />,
+      OnTheCanvas: PlatformReferenceLayer,
     }),
-    [gameUrl],
+    [],
   )
 
   const sendCaptureNow = useCallback(() => {
@@ -442,8 +475,8 @@ export default function App() {
             <dd>{roomId}</dd>
           </div>
           <div>
-            <dt>Scene</dt>
-            <dd>{sceneStatus}</dd>
+            <dt>Reference</dt>
+            <dd>{`${STAGE_REFERENCE.platforms?.length || 0} platforms`}</dd>
           </div>
           <div>
             <dt>Backend</dt>

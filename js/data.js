@@ -155,6 +155,7 @@
 
   // ---- default content -----------------------------------------------------
   function defaults() {
+    const stageReference = DS.stageReference || { view: VIEW, platforms: [] };
     return {
       version: 3,
       view: { w: VIEW.w, h: VIEW.h },
@@ -171,13 +172,8 @@
         blast: { left: -1100, right: VIEW.w + 1100, top: -900, bottom: VIEW.h + 950 },
       },
       stage: {
-        platforms: [
-          // [x, y(top), w, h, passthrough] — laid out in the 1920x1080 view
-          { x: 225,  y: 863, w: 1470, h: 195, pass: false }, // main ground
-          { x: 143,  y: 705, w: 353,  h: 39,  pass: true },  // left float
-          { x: 768,  y: 468, w: 384,  h: 39,  pass: true },  // center-high float
-          { x: 1425, y: 705, w: 353,  h: 39,  pass: true },  // right float
-        ],
+        // [x, y(top), w, h, passthrough] — laid out in the 1920x1080 view
+        platforms: clone(stageReference.platforms),
         spawns: [ { x: 660, y: 780 }, { x: 1260, y: 780 } ],
         // background structures (drawn behind, faded for depth) — rolling hills + a far ridge
         bg: [

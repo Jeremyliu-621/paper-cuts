@@ -36,19 +36,52 @@ body {
   background: #f7f4ec;
 }
 
-.game-scene-frame {
+.platform-reference-frame {
   position: absolute;
   top: 0;
   left: 0;
   width: 1920px;
   height: 1080px;
-  border: 0;
   background: #f7f4ec;
   pointer-events: none;
   transform: translate(0, 0);
   transform-origin: top left;
-  opacity: 0.82;
-  filter: saturate(0.92) contrast(0.96);
+  opacity: 0.88;
+}
+
+.platform-reference-svg {
+  display: block;
+  width: 1920px;
+  height: 1080px;
+  overflow: visible;
+}
+
+.reference-view-fill {
+  fill: #f7f4ec;
+}
+
+.reference-platform-shadow {
+  fill: #2f2a26;
+  opacity: 0.08;
+}
+
+.reference-platform {
+  fill: #fffaf0;
+  stroke: #2f2a26;
+  stroke-width: 6px;
+  vector-effect: non-scaling-stroke;
+}
+
+.reference-platform-pass {
+  stroke: #6b6259;
+}
+
+.reference-platform-topline {
+  stroke: #2f2a26;
+  stroke-width: 4px;
+  stroke-linecap: round;
+  opacity: 0.74;
+  vector-effect: non-scaling-stroke;
 }
 
 .tl-shapes {
