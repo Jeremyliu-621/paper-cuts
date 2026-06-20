@@ -104,8 +104,13 @@ If it prints `10.31.151.244`, start the draw client like this:
 
 ```sh
 cd draw-client
-VITE_BACKEND_URL=http://10.31.151.244:8000 npm run dev -- --host 0.0.0.0
+npm run dev -- --host 0.0.0.0
 ```
+
+When the iPad opens the draw client from `10.31.151.244`, the draw client automatically uses:
+
+- backend: `http://10.31.151.244:8000`
+- game reference: `http://10.31.151.244:8080/#play`
 
 Open on the laptop:
 
@@ -120,3 +125,9 @@ http://10.31.151.244:5173/?room=demo
 ```
 
 Replace `10.31.151.244` and `5173` with your actual IP and Vite port. Draw on the iPad; the laptop game canvas should show the overlay.
+
+If you need to override the backend manually, add it to the iPad URL:
+
+```text
+http://10.31.151.244:5173/?room=demo&backend=http://10.31.151.244:8000
+```

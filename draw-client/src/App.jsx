@@ -9,7 +9,7 @@ import {
   toRichText,
 } from 'tldraw'
 
-const DEFAULT_BACKEND_URL = 'http://localhost:8000'
+const DEFAULT_BACKEND_PORT = '8000'
 const DEFAULT_GAME_PORT = '8080'
 const DEFAULT_GAME_PATH = '/#play'
 const SYNC_DEBOUNCE_MS = 120
@@ -58,11 +58,24 @@ function getGameUrl() {
   return url.toString()
 }
 
+function getBackendUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const configuredUrl = params.get('backend') || import.meta.env.VITE_BACKEND_URL
+  if (configuredUrl) return configuredUrl
+
+  const url = new URL(window.location.href)
+  url.port = DEFAULT_BACKEND_PORT
+  url.pathname = '/'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
 function normalizeBackendUrl(rawUrl) {
   try {
     return new URL(rawUrl)
   } catch (_error) {
-    return new URL(DEFAULT_BACKEND_URL)
+    return new URL(`http://localhost:${DEFAULT_BACKEND_PORT}`)
   }
 }
 
@@ -244,7 +257,7 @@ export default function App() {
   const roomId = useMemo(getRoomId, [])
   const gameUrl = useMemo(getGameUrl, [])
   const backendUrl = useMemo(
-    () => normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL),
+    () => normalizeBackendUrl(getBackendUrl()),
     [],
   )
   const urls = useMemo(
