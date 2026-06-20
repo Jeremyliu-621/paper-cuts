@@ -4,18 +4,21 @@ Magic Board adds a creation phase to the existing Doodle Smash game. The creatio
 
 ## Phase 1: Drawing Bridge
 
-Goal: drawings from an iPad or browser appear on the laptop game canvas over the real game scene.
+Goal: drawings from an iPad or browser appear on the laptop game canvas while the drawing surface shows a static, platform-only reference of the level.
 
 The user journey:
 
 1. Laptop opens the Doodle Smash game scene.
 2. iPad or laptop opens a drawing surface in the same room.
-3. User draws rough platforms, character ideas, arrows, labels, or gameplay notes.
-4. Backend stores the canonical drawing and a derived projection.
-5. Laptop game renders the projection as an overlay.
-6. No game data is mutated.
+3. Drawing surface displays only gameplay-relevant platforms in a fixed 1920 x 1080 frame.
+4. User draws rough platforms, character ideas, arrows, labels, or gameplay notes over that static reference.
+5. Backend stores the canonical drawing and a derived projection.
+6. Laptop game renders the projection as an overlay.
+7. No game data is mutated.
 
-Phase 1 proves spatial communication. It is successful when the user can point at the laptop game scene, draw on another device, and see the drawing aligned over the game canvas.
+Phase 1 proves spatial communication. It is successful when the user can draw on top of a stable platform reference and see the drawing aligned over the laptop game canvas.
+
+The iPad reference should not be a second live match. It should not show timers, fighters, effects, projectiles, countdown, HUD, or dynamic camera movement.
 
 ## Phase 2: Clarification Agent
 
@@ -73,4 +76,3 @@ Asset enhancement is proposal-first. Generated assets are previewed before being
 ## What This Is Not
 
 This is not a generic game engine builder. The first target is the current Smash-style platform fighter. New mechanics can be added later, but the initial creation system should be excellent at building what the current game can already play.
-

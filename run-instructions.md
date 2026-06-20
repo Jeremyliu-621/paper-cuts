@@ -1,6 +1,8 @@
 # Run Instructions
 
-These commands run the current Phase 1 creation bridge: draw over a visible Doodle Smash scene in the draw client, and see that drawing as a non-mutating overlay on the existing Doodle Smash game canvas.
+These commands run the current Phase 1 creation bridge: draw over a Doodle Smash reference in the draw client, and see that drawing as a non-mutating overlay on the existing Doodle Smash game canvas.
+
+Phase 1 target note: the draw client reference is a static, platform-only, fixed-camera view. It does not show a second live match with its own timer, fighters, or dynamic camera.
 
 Copy commands as full lines. If your terminal wraps a long command visually, do not press Enter in the middle of flags like `--host`.
 
@@ -79,8 +81,7 @@ http://localhost:5173/?room=demo
 If Vite says it used another port, use that port instead.
 
 Draw inside the orange 1920 x 1080 game frame. Your drawing should appear over the laptop game canvas.
-The Doodle Smash scene should be visible inside the drawing frame so you can align your drawing with the actual level.
-By default, the draw client loads the game scene from the same host on port `8080`.
+The reference inside the drawing frame is the static platform-only level view so you can align your drawing with the actual platforms.
 
 Inspect backend capture state:
 
@@ -110,7 +111,7 @@ npm run dev -- --host 0.0.0.0
 When the iPad opens the draw client from `10.31.151.244`, the draw client automatically uses:
 
 - backend: `http://10.31.151.244:8000`
-- game reference: `http://10.31.151.244:8080/#play`
+- static platform reference from the current level data
 
 Open on the laptop:
 

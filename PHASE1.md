@@ -1,17 +1,18 @@
-# Phase 1: Drawing Bridge
+# Phase 1: Static Platform Drawing Bridge
 
-Phase 1 is complete: drawings from the draw client can appear as a live, non-mutating overlay on the existing Doodle Smash game canvas.
-The draw client also shows the Doodle Smash scene inside the drawing frame, so the user can draw directly on top of the visual game reference.
+Phase 1 uses a static, platform-only reference layer instead of embedding a second live Doodle Smash match.
+
+The goal is for the iPad/browser drawing surface to have a fixed 1920 x 1080 coordinate frame with only the current level's gameplay platforms visible behind the drawing layer. The laptop game still receives the drawing as a live, non-mutating overlay.
 
 ## What This Phase Does
 
-The current flow is:
+The intended flow is:
 
 1. The laptop opens the existing vanilla Doodle Smash game.
 2. The game opts into a creation-overlay room with `?overlay=<room>`.
 3. The draw client opens the same room.
-4. The draw client displays the Doodle Smash scene inside a 1920 x 1080 game frame.
-5. The user draws over that scene reference.
+4. The draw client displays a static platform-only reference layer inside a 1920 x 1080 game frame.
+5. The user draws over those platforms to describe level edits, characters, hazards, labels, or gameplay intent.
 6. The draw client sends:
    - canonical tldraw capture data;
    - derived game-view projection data.
@@ -19,6 +20,20 @@ The current flow is:
 8. The already-open game page receives the projection over WebSocket and renders it over the actual game canvas.
 
 Phase 1 does **not** mutate `DS.Store.data`. It is visual communication only.
+
+## Superseded Direction
+
+The previous implementation direction embedded a live game page inside the draw client. That is now deprecated for Phase 1 because it creates a second simulation with independent timers, fighters, camera, and match state. Even when the coordinates are correct, the iPad and laptop can appear visually different.
+
+The revised Phase 1 reference layer must be:
+
+- static;
+- platform-only by default;
+- fixed camera;
+- fixed 1920 x 1080 view-space coordinates;
+- free of HUD, timer, fighters, projectiles, effects, countdown, and dynamic camera motion.
+
+The draw client should not need an iframe pointed at `#play` for its normal reference view. It should consume a stage/platform reference representation and draw that behind tldraw.
 
 ## Removed/Replaced Legacy Direction
 
@@ -90,11 +105,14 @@ Files:
 
 - `draw-client/src/App.jsx`
 - `draw-client/src/styles.css`
+- `js/stageReferenceData.js`
 
 The draw client now:
 
-- shows the Doodle Smash scene as a non-interactive background inside the 1920 x 1080 drawing frame;
+- shows a static platform-only Doodle Smash reference inside the 1920 x 1080 drawing frame;
 - keeps the game frame locked in tldraw so drawings share the game's view-space coordinates;
+- uses a fixed camera centered on the authored view, not the live match camera;
+- hides all live-match-only visuals such as fighters, timer, HUD, effects, particles, countdown, and projectiles;
 - loads existing room capture, if present;
 - keeps tldraw capture as canonical source data;
 - derives a projection from tldraw shapes;
@@ -103,7 +121,7 @@ The draw client now:
 
 The backend URL comes from a `backend` query parameter, `VITE_BACKEND_URL`, or a default inferred from the current browser host on port `8000`.
 
-The game reference URL comes from a `game` query parameter, `VITE_GAME_URL`, or a default inferred from the current browser host on port `8080`. For example, opening the draw client at `http://10.31.151.244:5173/?room=demo` uses backend `http://10.31.151.244:8000` and loads the game reference from `http://10.31.151.244:8080/#play`.
+The static platform reference comes from the shared Meadow/default stage platform data in `js/stageReferenceData.js`, not from a second live `#play` game instance.
 
 Projection currently supports:
 
@@ -139,39 +157,40 @@ When enabled, it:
 
 Overlay render placement:
 
-- world overlay renders after fighters/effects/markers;
+- drawing projection renders in view space, aligned to the same 1920 x 1080 coordinate frame used by the draw client;
 - HUD status renders in the view-space HUD layer.
 
-## Verification Completed
+## Acceptance Criteria
 
-Automated checks run:
+Phase 1 should be considered complete when all of the following are true:
 
-- Backend tests: `6 passed`.
-- Draw client build: passed.
-- Playwright/Chromium installed and used for visual checks.
-- Game overlay visual smoke: passed.
-- Draw client visual smoke: passed.
-- Draw-client-to-backend end-to-end: passed.
-- Game receives draw-client projection: passed.
-- Human-style walkthrough: passed.
+- Backend tests pass.
+- Draw client build passes.
+- Draw client shows a static platform-only reference layer.
+- Reference layer uses fixed 1920 x 1080 view-space coordinates.
+- Reference layer has no timer, fighters, HUD, projectiles, effects, countdown, or dynamic camera.
+- User drawings align with the platform reference on the iPad/browser.
+- Same drawings appear aligned over the laptop game canvas.
+- Backend `/rooms/{room_id}/capture` version increases after drawing.
+- The existing game remains playable with the overlay disabled.
 
-Human-style walkthrough performed:
+Manual walkthrough to perform after implementation:
 
 1. Opened laptop game with an empty overlay room.
 2. Confirmed game overlay WebSocket connected with version `0`.
 3. Opened draw client in same room.
 4. Confirmed draw client debug panel showed connected.
-5. Confirmed the Doodle Smash scene was visible inside the draw-client frame.
-6. Drew a platform-like stroke over the scene.
+5. Confirmed the static platform reference was visible inside the draw-client frame.
+6. Drew a platform-like stroke over the platform reference.
 7. Checked backend `/capture` endpoint and confirmed projection objects existed.
 8. Confirmed the already-open game page received projection version updates without reload.
 9. Compared before/after screenshots and confirmed visible canvas change.
 
-Artifacts from the walkthrough were written to:
+Suggested artifacts from the walkthrough:
 
 - `/tmp/magicboard-phase1-before.png`
 - `/tmp/magicboard-phase1-after.png`
-- `/tmp/draw-scene-bg.png`
+- `/tmp/draw-static-platform-reference.png`
 
 ## How To Test Manually
 
@@ -209,7 +228,7 @@ http://localhost:5173/?room=demo
 ```
 
 Draw inside the orange 1920 x 1080 frame. The drawing should appear over the laptop game canvas.
-The Doodle Smash scene should be visible inside that frame while you draw.
+The static platform-only reference should be visible inside that frame while you draw.
 
 Backend state:
 
@@ -251,7 +270,7 @@ Draw on iPad. The laptop game canvas should update.
 ## Known Limits
 
 - Projection is visual only. It does not become platforms or characters yet.
-- The draw client does not show the live game scene behind the tldraw canvas yet; it shows a 1920 x 1080 frame that maps into the game view.
+- The static reference currently tracks the default editable Meadow platform layout; later phases can add map/stage selection.
 - The game overlay renders strokes, boxes/ellipses, and labels; it does not interpret meaning.
 - Phase 2 must build the clarification agent and candidate model.
 

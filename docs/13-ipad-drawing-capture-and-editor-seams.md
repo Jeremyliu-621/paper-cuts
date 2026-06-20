@@ -1,12 +1,14 @@
 # Drawing Capture And Editor Seams
 
-This document replaces the old standalone iPad persistence framing. The drawing client and backend are useful plumbing, but the product direction is a visual creation phase layered over the actual Doodle Smash game scene.
+This document replaces the old standalone iPad persistence framing. The drawing client and backend are useful plumbing, but the product direction is a visual creation phase layered over the actual Doodle Smash level structure.
 
 ## Correct Mental Model
 
-The drawing is not the level editor by itself. It is visual intent captured over a game-stage frame. The system should store the drawing, derive game-friendly projection data, ask clarifying questions, and eventually produce typed game patches.
+The drawing is not the level editor by itself. It is visual intent captured over a static game-stage reference. The system should store the drawing, derive game-friendly projection data, ask clarifying questions, and eventually produce typed game patches.
 
 Phase 1 must only render drawings over the game canvas. It should not mutate game data.
+
+The iPad/browser reference for Phase 1 should be static and platform-only. It should use the game's 1920 x 1080 view-space coordinate system without a live match simulation, dynamic camera, fighters, timer, HUD, projectiles, particles, or countdown state.
 
 ## Current Game Source Of Truth
 
@@ -18,7 +20,7 @@ The active game is the root vanilla app:
 - `server.js`
 - `js/*.js`
 
-`js/data.js` owns `DS.Store.data`, a serializable JSON tree persisted to `localStorage` under `doodle-smash:data:v3`.
+`js/data.js` owns `DS.Store.data`, a serializable JSON tree persisted to `localStorage` under `doodle-smash:data:v3`. `js/stageReferenceData.js` contains the shared default platform reference used by both the editable Meadow defaults and the Phase 1 draw-client underlay.
 
 Important data:
 
@@ -72,6 +74,13 @@ The backend should store both:
 - canonical drawing capture, such as a tldraw snapshot;
 - derived projection data that the vanilla game can render cheaply.
 
+The draw client's background/reference layer should come from selected stage platform data:
+
+- render platform rectangles/gimmick outlines in 1920 x 1080 view space;
+- keep camera fixed;
+- show only gameplay-relevant geometry needed for drawing alignment;
+- avoid running a second live game scene.
+
 Projection data should include:
 
 - room ID;
@@ -88,4 +97,3 @@ The game should render projection data as a non-mutating overlay. It should not 
 ## Later Conversion Boundary
 
 The future agent should infer candidate game records and ask clarifying questions before proposing patches. It should produce typed proposals against known seams, not arbitrary code changes.
-
