@@ -56,6 +56,19 @@ fi
 PY="$(command -v python3 || command -v python)"
 echo "using python: ${PY} ($("${PY}" --version 2>&1))"
 
+# Guard: we MUST be inside the Neuron virtualenv (torch-neuronx importable), not the bare
+# system python (which is PEP-668 externally-managed AND has no Neuron SDK). This is the #1
+# setup mistake on the workshop box.
+if ! "${PY}" -c "import torch_neuronx" >/dev/null 2>&1; then
+  echo "" >&2
+  echo "ERROR: torch_neuronx is NOT importable with ${PY}." >&2
+  echo "You are not in the Neuron virtualenv. Activate it first, then re-run, e.g.:" >&2
+  echo "    source /opt/aws_neuronx_venv_pytorch_2_9/bin/activate" >&2
+  echo "(run 'ls /opt' and pick the aws_neuronx_venv_pytorch_* that matches this box)" >&2
+  exit 1
+fi
+echo "torch_neuronx import OK — inside the Neuron venv."
+
 echo
 echo "--> upgrading pip tooling"
 "${PY}" -m pip install --upgrade pip setuptools wheel

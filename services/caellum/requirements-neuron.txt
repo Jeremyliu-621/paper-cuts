@@ -8,19 +8,20 @@
 # reinstall them here — doing so can break the matched runtime/compiler/driver set.
 # `pip install -r` this file with the Neuron pip index already configured by the env.
 #
-# Pins are conservative-recent and chosen to match the optimum-neuron release line
-# that supports NeuronStableDiffusion(XL)ControlNetPipeline + lora_model_ids +
-# inline_weights_to_neff. If a pin conflicts with the workshop's Neuron SDK, relax
-# the upper bound rather than the SDK (see RUNBOOK-image.md).
+# The workshop box runs a RECENT Neuron SDK (e.g. torch 2.9), so we do NOT hard-pin
+# optimum-neuron to an old release — that would fight the pre-installed torch-neuronx. We
+# let pip install a version compatible with the installed SDK, and let optimum-neuron resolve
+# its own diffusers/transformers. RULE: pip must NOT up/downgrade torch / torch-neuronx — if
+# it tries to, stop and report (the SDK runtime/compiler/driver set must stay matched).
 
-optimum-neuron==0.0.28        # provides the Neuron Stable Diffusion / ControlNet pipelines + optimum-cli export neuron
-diffusers==0.31.0             # pulled in transitively by optimum-neuron; pinned for reproducible compile graphs
-transformers==4.43.4          # kept within optimum-neuron's supported range
-accelerate==0.33.0            # model loading / device map helpers used during from_pretrained
-controlnet-aux==0.0.9         # scribble / canny preprocessors for the control image (serve side)
-rembg==2.0.59                 # background removal -> RGBA sprite (serve side)
-fastapi==0.111.1              # /enhance + /healthz HTTP app (serve side)
-uvicorn==0.30.5               # ASGI server for serve.py
-pillow==10.4.0                # PNG decode/encode, image resize to SHAPE
-numpy==1.26.4                 # array glue between PIL / controlnet-aux / rembg (numpy<2 for Neuron-stack compat)
-onnxruntime==1.18.1           # rembg's U2Net inference backend (CPU); pin to avoid surprise major bumps
+optimum-neuron               # Neuron Stable Diffusion / ControlNet pipelines + optimum-cli export neuron
+diffusers                    # resolved by optimum-neuron to a compatible version
+transformers                 # resolved by optimum-neuron to a compatible version
+accelerate                   # model loading helpers used during from_pretrained
+controlnet-aux               # scribble / canny preprocessors for the control image (serve side)
+rembg                        # background removal -> RGBA sprite (serve side)
+fastapi                      # /enhance + /healthz HTTP app (serve side)
+uvicorn                      # ASGI server for serve.py
+pillow                       # PNG decode/encode, image resize to SHAPE
+numpy<2                      # Neuron stack + onnxruntime compatibility (avoid numpy 2.x)
+onnxruntime                  # rembg's U2Net inference backend (CPU)
