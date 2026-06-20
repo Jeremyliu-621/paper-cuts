@@ -23,5 +23,5 @@ rembg                        # background removal -> RGBA sprite (serve side)
 fastapi                      # /enhance + /healthz HTTP app (serve side)
 uvicorn                      # ASGI server for serve.py
 pillow                       # PNG decode/encode, image resize to SHAPE
-numpy<2                      # Neuron stack + onnxruntime compatibility (avoid numpy 2.x)
+numpy                        # leave the box's pre-installed numpy as-is; do NOT force <2 (this box ships numpy 2.x with torch 2.9)
 onnxruntime                  # rembg's U2Net inference backend (CPU)
