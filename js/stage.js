@@ -563,13 +563,36 @@
   const HANG_KINDS = ['vine', 'roots', 'moss', 'tendril'];
   function pick(rnd, arr) { return arr[(rnd() * arr.length) | 0]; }
 
-  // highest non-moving platform top strictly below `belowY` spanning `x` (what a pillar lands on)
+  // world-space TOP contour of a platform — the drawn stroke itself, or a flat line on a rectangle.
+  function topContour(p) {
+    if (p.kind === 'drawn' && p.pts && p.pts.length > 1) return p.pts.map((pt) => [p.x + pt[0], p.y + pt[1]]);
+    return [[p.x, p.y], [p.x + p.w, p.y]];
+  }
+  // top point at world x: the HIGHEST surface (smallest y) spanning x + local tilt. null if outside.
+  function topAt(contour, x) {
+    let y = null, tilt = 0;
+    for (let i = 0; i < contour.length - 1; i++) {
+      const a = contour[i], b = contour[i + 1];
+      if (x < Math.min(a[0], b[0]) - 0.01 || x > Math.max(a[0], b[0]) + 0.01) continue;
+      const dx = b[0] - a[0], t = Math.abs(dx) < 1e-6 ? 0 : (x - a[0]) / dx;
+      const yy = a[1] + (b[1] - a[1]) * t;
+      if (y === null || yy < y) {
+        y = yy; let ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+        if (ang > Math.PI / 2) ang -= Math.PI; else if (ang < -Math.PI / 2) ang += Math.PI;
+        tilt = ang;
+      }
+    }
+    return y === null ? null : { y, tilt };
+  }
+  // the highest platform SURFACE below `belowY` spanning `x`, via each candidate's real top contour
+  // (so a pillar lands on the actual, possibly slanted, surface). Returns {y, tilt} or null.
   function surfaceBelow(plats, x, belowY, ignore) {
-    let best = Infinity;
+    let best = null;
     for (const q of plats) {
       if (q === ignore || q.move) continue;
       if (x < q.x + 6 || x > q.x + q.w - 6) continue;
-      if (q.y >= belowY && q.y < best) best = q.y;
+      const ta = topAt(topContour(q), x);
+      if (ta && ta.y >= belowY && (!best || ta.y < best.y)) best = ta;
     }
     return best;
   }
@@ -654,10 +677,10 @@
           if (span > 560 && density >= 1) xs.splice(1, 0, (l + r) / 2);
           for (let i = 0; i < xs.length; i++) {
             const x = xs[i], u = undersideAt(contour, x), topY = u ? u.y : pb, tilt = u ? u.tilt : 0;
-            const sup = surfaceBelow(plats, x, topY + 2, p), gap = sup - topY;
-            if (sup !== Infinity && gap > GAP_MIN && gap < PILLAR_MAX) {
-              behind.push({ t: 'pillar', x, topY, botY: sup, tilt, thin: !!p.pass, seed: seed + 10 + i * 7 });
-              if (density >= 0.5 && i < 2) front.push({ t: 'plant', x, y: sup, kind: pick(DS.makeRng(seed + 20 + i), TOP_KINDS), s: 0.78, seed: seed + 20 + i });
+            const sup = surfaceBelow(plats, x, topY + 2, p);
+            if (sup && sup.y - topY > GAP_MIN && sup.y - topY < PILLAR_MAX) {
+              behind.push({ t: 'pillar', x, topY, botY: sup.y, tilt, botTilt: sup.tilt, thin: !!p.pass, seed: seed + 10 + i * 7 });
+              if (density >= 0.5 && i < 2) front.push({ t: 'plant', x, y: sup.y, tilt: sup.tilt, kind: pick(DS.makeRng(seed + 20 + i), TOP_KINDS), s: 0.78, seed: seed + 20 + i });
             }
           }
           // overhangs → a jagged island edge (and foliage) on each jutting side, following the underside
@@ -665,13 +688,14 @@
           if (pr - r > 50) { behind.push({ t: 'island', top: undersideStrip(contour, r - 8, pr), depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, contour, r + 8, pr - 8, density, seed + 42); }
         }
       }
-      // ---- a few varied plants ON TOP (any non-gimmick platform) ----
+      // ---- a few varied plants ON TOP, sitting on the real surface and tilting with it ----
       if (!gimmick && p.w >= 110) {
+        const topC = topContour(p);
         const n = Math.max(0, Math.round((p.w / 300) * density));
         for (let i = 0; i < n; i++) {
           const r2 = DS.makeRng(seed + 700 + i * 29);
-          const x = p.x + 32 + (p.w - 64) * r2();
-          front.push({ t: 'plant', x, y: p.y + 2, kind: pick(r2, isBase ? TOP_KINDS_BIG : TOP_KINDS), s: 0.76 + r2() * 0.5, seed: seed + 700 + i });
+          const x = p.x + 32 + (p.w - 64) * r2(), ta = topAt(topC, x);
+          front.push({ t: 'plant', x, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, kind: pick(r2, isBase ? TOP_KINDS_BIG : TOP_KINDS), s: 0.76 + r2() * 0.5, seed: seed + 700 + i });
         }
       }
     }
@@ -690,8 +714,10 @@
     const courses = Math.max(1, Math.round(h / 130));
     for (let i = 1; i <= courses; i++) { const y = topY + 6 + ((h - 6) * i) / (courses + 1); D.line(ctx, cx - wt * 0.8, y, cx + wt * 0.8, y, { width: 2, color: SCN, rnd, passes: 1 }); }
     ctx.globalAlpha = 1;
-    D.strokePts(ctx, [[cx - wb - 7, botY], [cx + wb + 7, botY], [cx + wb + 2, botY - 9], [cx - wb - 2, botY - 9]],
-      { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // base footing
+    ctx.save(); ctx.translate(cx, botY); ctx.rotate(it.botTilt || 0); // footing flush to the surface it rests on
+    D.strokePts(ctx, [[-wb - 7, 0], [wb + 7, 0], [wb + 2, -9], [-wb - 2, -9]],
+      { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    ctx.restore();
     ctx.save(); ctx.translate(cx, topY); ctx.rotate(tilt); // capital flush to the underside slope
     D.strokePts(ctx, [[-wt - 6, 0], [wt + 6, 0], [wt + 2, 11], [-wt - 2, 11]],
       { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
@@ -733,7 +759,7 @@
   // varied little plants growing UP from a surface (x,y)
   function drawTopPlant(ctx, it) {
     const rnd = DS.makeRng(it.seed);
-    ctx.save(); ctx.translate(it.x, it.y); ctx.scale(it.s || 1, it.s || 1);
+    ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.tilt || 0); ctx.scale(it.s || 1, it.s || 1); // grow perpendicular to the surface
     if (it.kind === 'tuft') {
       for (let i = -1; i <= 1; i++) D.curve(ctx, [[i * 6, 0], [i * 9, -13], [i * 15, -20]], { width: 3, color: SCN, rnd, passes: 1 });
     } else if (it.kind === 'stalk') {
