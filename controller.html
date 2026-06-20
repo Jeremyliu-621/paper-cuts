@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Doodle Smash — Controller</title>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Gloria+Hallelujah&display=swap" rel="stylesheet">
+<style>
+  :root{ --ink:#2f2a26; --paper:#f6f1e7; --paper2:#efe7d8; --accent:#d4663f;
+    --oct:polygon(29% 0,71% 0,100% 29%,100% 71%,71% 100%,29% 100%,0 71%,0 29%); }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; -webkit-user-select:none;}
+  html,body{margin:0;height:100%;overflow:hidden;touch-action:none;
+    font-family:'Patrick Hand',cursive,sans-serif; background:var(--paper2); color:var(--ink);}
+
+  #pad{position:fixed;inset:0;}
+
+  /* centre status (between the two thumbs) — doesn't eat touches */
+  #center{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:1;pointer-events:none;text-align:center;opacity:.85;}
+  #center .me{font-family:'Gloria Hallelujah',cursive;font-size:3.2vh;}
+  #dot{display:inline-block;width:1.6vh;height:1.6vh;border-radius:50%;background:#b3402a;vertical-align:middle;margin-right:.8vh;}
+  #dot.ok{background:#5b8c5a;}
+
+  .circ{position:absolute;border:0.7vh solid var(--ink);border-radius:50%;background:var(--paper);color:var(--ink);
+    display:flex;align-items:center;justify-content:center;z-index:3;box-shadow:0.5vh 0.6vh 0 rgba(47,42,38,.18);}
+  .circ.down{background:var(--ink);color:var(--paper);box-shadow:0.1vh 0.1vh 0 rgba(47,42,38,.18);}
+  .cap{position:absolute;bottom:1.5vh;font-size:1.9vh;color:#6b6259;}
+  .circ.down .cap{color:var(--paper);}
+
+  /* hand-drawn (rough-stroke) icons — stroke colour comes from the button via currentColor
+     (set as attributes on the defs so they cross the <use> shadow boundary) */
+  .ico{width:11vh;height:11vh;display:block;}
+  .ico-lg{width:16vh;height:16vh;}
+  .r-right{transform:rotate(90deg);} .r-down{transform:rotate(180deg);} .r-left{transform:rotate(270deg);}
+
+  /* D-pad — four big overlapping arrow buttons (left half) */
+  #dpad{position:absolute;left:1vh;top:50%;transform:translateY(-50%);width:84vh;height:84vh;z-index:3;}
+  .dbtn{width:39vh;height:39vh;position:absolute;}
+  #arUp{left:50%;top:0;transform:translateX(-50%);}
+  #arDown{left:50%;bottom:0;transform:translateX(-50%);}
+  #arLeft{left:0;top:50%;transform:translateY(-50%);}
+  #arRight{right:0;top:50%;transform:translateY(-50%);}
+  #arUp.down{transform:translateX(-50%) translate(0.3vh,0.4vh);} #arDown.down{transform:translateX(-50%) translate(0.3vh,0.4vh);}
+  #arLeft.down{transform:translateY(-50%) translate(0.3vh,0.4vh);} #arRight.down{transform:translateY(-50%) translate(0.3vh,0.4vh);}
+
+  /* right side: big JUMP top-right, big ATTACK bottom-right, big SPECIAL joystick to attack's lower-left */
+  #btnJumpR{right:3vh;top:4vh;width:30vh;height:30vh;}
+  #btnAtk{right:3vh;bottom:3vh;width:38vh;height:38vh;}
+  #spZone{right:44vh;bottom:4vh;width:38vh;height:38vh;position:absolute;z-index:3;}
+  /* octagon special pad: accent ring (outer octagon) + faint fill (inset inner octagon) */
+  #spBase{position:absolute;inset:0;background:var(--accent);clip-path:var(--oct);}
+  #spBase::after{content:'';position:absolute;inset:0.7vh;background:#efdccf;clip-path:var(--oct);}
+  #spKnob{position:absolute;left:50%;top:50%;width:17vh;height:17vh;transform:translate(-50%,-50%);
+    border:0.7vh solid var(--accent);border-radius:50%;background:var(--paper);color:var(--accent);
+    display:flex;align-items:center;justify-content:center;}
+  #spKnob.act{background:var(--accent);color:var(--paper);}
+  #spKnob .ico{width:8.5vh;height:8.5vh;}
+  #spZone .cap{position:absolute;left:50%;bottom:-2.6vh;transform:translateX(-50%);white-space:nowrap;color:#6b6259;}
+
+  /* ---- pre-game setup: draw your fighter + pick an ult + ready (z above the pad) ---- */
+  #setup{position:fixed;inset:0;z-index:8;background:var(--paper);display:none;}
+  #setup.show{display:flex;}
+  .setup-left{flex:1.25;display:flex;flex-direction:column;padding:1.4vh 1vh;min-width:0;}
+  .setup-right{flex:1;display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:1.6vh;padding:1.4vh 2vh 1.4vh 0;}
+  .setup-head{font-family:'Gloria Hallelujah',cursive;font-size:2.6vh;text-align:center;margin-bottom:.6vh;}
+  #cdraw{flex:1;width:100%;background:var(--paper);border:0.5vh solid var(--ink);border-radius:1.4vh;touch-action:none;}
+  .setup-tools{display:flex;gap:1.2vh;justify-content:center;align-items:center;margin-top:1vh;}
+  .setup-tools button{font-family:inherit;font-size:2vh;border:0.4vh solid var(--ink);border-radius:1vh;background:var(--paper);color:var(--ink);padding:.6vh 2.4vh;}
+  .setup-tools button:active{background:var(--ink);color:var(--paper);}
+  .brush{display:flex;align-items:center;gap:1.2vh;flex:1;min-width:14vh;max-width:34vh;}
+  .brush input{flex:1;accent-color:var(--accent);height:2.4vh;}
+  .brush-dot{flex:0 0 auto;width:3vh;height:3vh;border-radius:50%;background:var(--ink);box-shadow:0 0 0 0.3vh var(--paper2);}
+  .setup-label{text-align:center;font-size:2vh;color:#6b6259;}
+  .cults{display:flex;gap:1.4vh;justify-content:center;}
+  .cult{display:flex;flex-direction:column;align-items:center;gap:.4vh;font-family:inherit;font-size:1.7vh;color:#6b6259;
+    border:0.5vh solid var(--ink-soft,#6b6259);border-radius:1.4vh;background:var(--paper);padding:.8vh .8vh .4vh;}
+  .cult.sel{border-color:#2f6fe0;color:var(--ink);}
+  .cult canvas{width:9vh;height:9vh;display:block;}
+  .cready{font-family:'Gloria Hallelujah',cursive;font-size:3vh;border:0.6vh solid var(--ink);border-radius:1.6vh;
+    background:var(--paper);color:var(--ink);padding:1.4vh 0;}
+  .cready.on{background:#2f6fe0;color:var(--paper);border-color:#1c46a8;}
+  .cwait{display:none;text-align:center;font-size:1.9vh;color:#5b8c5a;}
+  #setup.readywait .cwait{display:block;}
+  /* portrait: stack vertically so the draw pad gets the full width (landscape cuts it off) */
+  @media (orientation:portrait){
+    #setup.show{flex-direction:column;}
+    .setup-left{flex:1;padding:2.5vw 3vw 0;}
+    .setup-right{flex:0 0 auto;padding:2vw 3vw 3vw;gap:2.4vw;justify-content:flex-start;}
+    .setup-head{font-size:4vw;}
+    #cdraw{border-radius:2.4vw;}
+    .setup-tools{gap:3vw;margin-top:2vw;flex-wrap:wrap;}
+    .setup-tools button{font-size:3.4vw;border-width:.7vw;border-radius:2vw;padding:1.2vw 6vw;}
+    .brush{flex:1 0 60vw;min-width:0;max-width:none;gap:3vw;}
+    .brush input{height:4vw;}
+    .brush-dot{width:6vw;height:6vw;}
+    .setup-label{font-size:3.4vw;}
+    .cults{gap:3vw;}
+    .cult{font-size:3vw;border-width:.8vw;border-radius:2.4vw;padding:1.6vw 1.6vw .8vw;}
+    .cult canvas{width:18vw;height:18vw;}
+    .cready{font-size:5.4vw;border-width:1vw;border-radius:2.8vw;padding:2.6vw 0;}
+    .cwait{font-size:3.4vw;}
+  }
+
+  #msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:14px;background:var(--paper);z-index:10;text-align:center;padding:24px;}
+  #msg.show{display:flex;}
+  #msg h1{font-family:'Gloria Hallelujah',cursive;font-size:28px;margin:0;}
+  #msg p{font-size:18px;color:#6b6259;margin:0;max-width:420px;}
+  #msg button{font-family:inherit;font-size:20px;border:3px solid var(--ink);border-radius:12px;background:var(--accent);color:var(--paper);padding:8px 22px;}
+  #rotate{position:fixed;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;background:var(--paper);z-index:9;text-align:center;padding:20px;font-size:22px;}
+  #rotate.show{display:flex;}
+  #rotate svg{width:64px;height:64px;color:var(--ink);animation:wob 1.4s ease-in-out infinite;}
+  @keyframes wob{0%,100%{transform:rotate(-12deg);}50%{transform:rotate(80deg);}}
+</style>
+</head>
+<body>
+  <div id="center"><span id="dot"></span><span class="me" id="me">connecting…</span></div>
+
+  <!-- reusable hand-drawn glyphs -->
+  <svg style="display:none"><defs>
+    <g id="g-arrow" fill="none" stroke="currentColor" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M32 53 C31 39 32 27 32 15"/><path d="M18 31 C24 23 28 19 32 13 C36 19 40 23 46 31"/></g>
+    <g id="g-star" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"><path d="M32 7 L39.5 25 L59 26.5 L44 39 L48.5 58 L32 47.5 L15.5 58 L20 39 L5 26.5 L24.5 25 Z"/></g>
+    <g id="g-spark" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M32 10 C33.5 25 39 30.5 54 32 C39 33.5 33.5 39 32 54 C30.5 39 25 33.5 10 32 C25 30.5 30.5 25 32 10 Z"/></g>
+  </defs></svg>
+
+  <div id="pad">
+    <div id="dpad">
+      <div class="circ dbtn" id="arUp" data-tap="jump"><svg class="ico" viewBox="0 0 64 64"><use href="#g-arrow"/></svg><span class="cap">jump</span></div>
+      <div class="circ dbtn" id="arLeft" data-hold="l"><svg class="ico r-left" viewBox="0 0 64 64"><use href="#g-arrow"/></svg></div>
+      <div class="circ dbtn" id="arRight" data-hold="r"><svg class="ico r-right" viewBox="0 0 64 64"><use href="#g-arrow"/></svg></div>
+      <div class="circ dbtn" id="arDown" data-hold="d"><svg class="ico r-down" viewBox="0 0 64 64"><use href="#g-arrow"/></svg><span class="cap">crouch</span></div>
+    </div>
+
+    <div class="circ" id="btnJumpR" data-tap="jump"><svg class="ico" viewBox="0 0 64 64"><use href="#g-arrow"/></svg><span class="cap">jump</span></div>
+    <div id="spZone" data-joy="1">
+      <div id="spBase"></div>
+      <div id="spKnob"><svg class="ico" viewBox="0 0 64 64"><use href="#g-spark"/></svg></div>
+      <div class="cap">special · 8-way</div>
+    </div>
+    <div class="circ" id="btnAtk" data-tap="jab"><svg class="ico ico-lg" viewBox="0 0 64 64"><use href="#g-star"/></svg><span class="cap">attack</span></div>
+  </div>
+
+  <!-- pre-game: draw your fighter, pick your ultimate, then Ready -->
+  <div id="setup">
+    <div class="setup-left">
+      <div class="setup-head" id="setupMe">You are Player —</div>
+      <canvas id="cdraw"></canvas>
+      <div class="setup-tools">
+        <button id="cUndo">Undo</button>
+        <button id="cClear">Clear</button>
+        <label class="brush"><span class="brush-dot" id="cBrushDot"></span><input id="cBrush" type="range" min="2" max="22" value="6"></label>
+      </div>
+    </div>
+    <div class="setup-right">
+      <div class="setup-label">trace the ghost · then pick an ultimate</div>
+      <div id="cUlts" class="cults"></div>
+      <button id="cReady" class="cready">Ready</button>
+      <div id="cWait" class="cwait">✓ ready — waiting for the others…</div>
+    </div>
+  </div>
+
+  <div id="rotate"><svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="6" width="36" height="52" rx="6"/><line x1="26" y1="51" x2="38" y2="51"/></svg><div id="rotateMsg">turn your phone sideways</div></div>
+
+  <div id="msg" class="show">
+    <h1 id="msgTitle">Join the brawl</h1>
+    <p id="msgText">Connecting to the lobby…</p>
+    <button id="msgBtn" style="display:none">Retry</button>
+  </div>
+
+<!-- the draw pad reuses the game's own doodle renderer + skin model, so a phone
+     builds the exact skin object the host already knows how to animate -->
+<script>
+  (function(){ var files=['rng','draw','skin']; var bust='?v='+Date.now();
+    for(var i=0;i<files.length;i++) document.write('<scr'+'ipt src="js/'+files[i]+'.js'+bust+'"></scr'+'ipt>'); })();
+</script>
+<script>
+(function(){
+  'use strict';
+  var DS=window.DS, DPR=Math.min(2,window.devicePixelRatio||1); DS.DPR=DPR;
+  var qs=new URLSearchParams(location.search);
+  var lobby=(qs.get('lobby')||'').toUpperCase();
+  var name=qs.get('name')||('Doodler '+(1+Math.floor(Math.random()*99)));
+
+  var dot=document.getElementById('dot'), me=document.getElementById('me');
+  var msg=document.getElementById('msg'), msgTitle=document.getElementById('msgTitle'), msgText=document.getElementById('msgText'), msgBtn=document.getElementById('msgBtn');
+  function showMsg(t,x,btn){ msgTitle.textContent=t; msgText.textContent=x; msgBtn.style.display=btn?'block':'none'; msg.classList.add('show'); }
+  function hideMsg(){ msg.classList.remove('show'); }
+
+  // ---- networking ----
+  var ws=null, slot=null, alive=false;
+  function wsURL(){ return (location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws'; }
+  function connect(){
+    if(!lobby){ showMsg('No lobby code','Open this page by scanning the QR from the game menu.',false); return; }
+    ws=new WebSocket(wsURL());
+    ws.onopen=function(){ ws.send(JSON.stringify({t:'join',lobby:lobby,name:name})); };
+    ws.onmessage=function(ev){ var m; try{m=JSON.parse(ev.data);}catch(e){return;}
+      if(m.t==='joined'){ slot=m.slot; alive=true; dot.classList.add('ok'); me.textContent='You are Player '+slot; setupMe.textContent='You are Player '+slot; hideMsg(); setPhase('setup'); sendSkin(); send({ev:'ult',ult:curUlt}); }
+      else if(m.t==='full'){ showMsg('Lobby full','This lobby already has 6 players.',false); }
+      else if(m.t==='nolobby'){ showMsg('Lobby not found','That lobby closed or the code is wrong. Scan a fresh QR.',false); }
+      else if(m.t==='hostgone'){ alive=false; dot.classList.remove('ok'); showMsg('Host left','The game host disconnected.',true); }
+      else if(m.t==='assign'){ if(m.color) document.documentElement.style.setProperty('--accent', m.color); }
+      else if(m.t==='lobby'){ starting=false; if(isReady) setReady(false); setPhase('setup'); }   // host (re)opened the lobby
+      else if(m.t==='starting'){ starting=true; checkOrient(); }                     // all ready → rotate to landscape
+      else if(m.t==='notstarting'){ starting=false; checkOrient(); }                 // someone un-readied → cancel
+      else if(m.t==='play'){ starting=false; setPhase('play'); }                     // match started → show the pad
+    };
+    ws.onclose=function(){ alive=false; dot.classList.remove('ok'); me.textContent='reconnecting…'; setTimeout(connect,1200); };
+    ws.onerror=function(){ try{ws.close();}catch(e){} };
+  }
+  function send(d){ if(ws&&ws.readyState===1&&alive) ws.send(JSON.stringify({t:'in',d:d})); }
+  function sendEv(ev,extra){ var d={ev:ev}; if(extra) for(var k in extra) d[k]=extra[k]; send(d); }
+
+  // ---- pre-game setup: draw your fighter + pick an ult + ready ----
+  // The phone builds the SAME skin object the host animates, and reports its ult/ready
+  // over the relay; the host lobby mirrors all three live.
+  var D=DS.draw, POWER='#2f6fe0', POWERD='#1c46a8', ACCENT=D.COL.accent, PAPER=D.COL.paper;
+  function paint(cv,w,h,fn){ cv.width=Math.round(w*DPR); cv.height=Math.round(h*DPR); var c=cv.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0); c.clearRect(0,0,w,h); fn(c,w,h); }
+  function drawUltIcon(ctx,id,w,h){ var rnd=DS.makeRng(id.length+3); ctx.save(); ctx.translate(w/2,h/2);
+    if(id==='hammer'){ ctx.rotate(0.5); D.line(ctx,0,13,0,-12,{width:5,color:POWER,rnd:rnd,passes:1}); D.strokePts(ctx,[[-9,-12],[12,-12],[12,-24],[-9,-24]],{width:4,color:POWER,rnd:rnd,closed:true,fill:POWERD}); }
+    else if(id==='sniper'){ D.circle(ctx,0,0,14,{width:4,color:ACCENT,rnd:rnd}); D.line(ctx,-20,0,20,0,{width:3,color:ACCENT,rnd:rnd,passes:1}); D.line(ctx,0,-20,0,20,{width:3,color:ACCENT,rnd:rnd,passes:1}); D.circle(ctx,0,0,3.5,{width:3,color:ACCENT,rnd:rnd,fill:ACCENT}); }
+    else { var c='#5b8c5a'; D.strokePts(ctx,[[-12,-4],[-17,-21],[-3,-10]],{width:3,color:c,rnd:rnd,closed:true,fill:PAPER}); D.strokePts(ctx,[[12,-4],[17,-21],[3,-10]],{width:3,color:c,rnd:rnd,closed:true,fill:PAPER}); D.circle(ctx,0,0,13,{width:4,color:c,rnd:rnd,fill:PAPER}); D.strokePts(ctx,[[-6,6],[6,6],[4,17],[-4,17]],{width:3,color:c,rnd:rnd,closed:true,fill:PAPER}); D.circle(ctx,0,15,2.4,{width:2.4,color:c,rnd:rnd,fill:c}); ctx.fillStyle=c; for(var k=0;k<2;k++){var ex=k?5:-5; ctx.beginPath(); ctx.arc(ex,-2,2,0,7); ctx.fill();} }
+    ctx.restore(); }
+
+  var ULTS=[{id:'hammer',name:'Hammer'},{id:'sniper',name:'Sniper'},{id:'werewolf',name:'Werewolf'}];
+  var curUlt='hammer', cUlts=document.getElementById('cUlts');
+  function buildUlts(){ cUlts.innerHTML=''; ULTS.forEach(function(u){ var b=document.createElement('button'); b.className='cult'+(curUlt===u.id?' sel':''); var cv=document.createElement('canvas'); b.appendChild(cv); var nm=document.createElement('div'); nm.textContent=u.name; b.appendChild(nm); paint(cv,64,64,function(ctx){drawUltIcon(ctx,u.id,64,64);}); b.onclick=function(){ curUlt=u.id; send({ev:'ult',ult:u.id}); buildUlts(); }; cUlts.appendChild(b); }); }
+
+  // draw pad — mirrors the host's draw pad exactly (same transform + skin model)
+  var skin=DS.skin.emptySkin(), drawing=null, drawHist=[], brushW=6, cdraw=document.getElementById('cdraw');
+  function manXform(lw,lh){ var Z=Math.min(lw/100,lh/124); return {cx:lw/2,cy:lh/2-4*Z,Z:Z}; }
+  function toMan(e){ var r=cdraw.getBoundingClientRect(),T=manXform(r.width,r.height); return [((e.clientX-r.left)-T.cx)/T.Z,((e.clientY-r.top)-T.cy)/T.Z]; }
+  function renderDraw(){ var cv=cdraw,lw=cv.clientWidth,lh=cv.clientHeight; if(!lw||!lh)return;
+    if(cv.width!==Math.round(lw*DPR)){cv.width=Math.round(lw*DPR);cv.height=Math.round(lh*DPR);}
+    var ctx=cv.getContext('2d'); ctx.setTransform(DPR,0,0,DPR,0,0); ctx.clearRect(0,0,lw,lh);
+    var T=manXform(lw,lh); ctx.save(); ctx.translate(T.cx,T.cy); ctx.scale(T.Z,T.Z);
+    DS.skin.drawMannequin(ctx,'auto');
+    DS.skin.PARTS.forEach(function(name){ var pt=skin.parts[name]; if(!pt.strokes.length)return; ctx.save(); ctx.translate(DS.skin.PIVOTS[name].x,DS.skin.PIVOTS[name].y); DS.skin.drawStrokes(ctx,pt.strokes,DS.makeRng(9)); ctx.restore(); });
+    if(drawing&&drawing.pts.length){
+      if(drawing.pts.length===1){ var p0=drawing.pts[0]; ctx.fillStyle=DS.draw.COL.accent; ctx.beginPath(); ctx.arc(p0[0],p0[1],drawing.w/2,0,7); ctx.fill(); } // tap = a dot
+      else DS.draw.strokePts(ctx,drawing.pts,{width:drawing.w,color:DS.draw.COL.accent,rnd:DS.makeRng(3),jitter:0.3,passes:1});
+    }
+    ctx.restore(); }
+  function sendSkin(){ send({ev:'skin',skin:skin}); }
+  // accept taps too: a single-point stroke becomes a dot (DS.skin renders 1-pt strokes as a blob)
+  function storeStroke(s){ if(!s.pts.length)return; var part=DS.skin.assign(s.pts),piv=DS.skin.PIVOTS[part]; skin.parts[part].strokes.push({pts:s.pts.map(function(p){return [p[0]-piv.x,p[1]-piv.y];}),w:s.w}); drawHist.push(part); skin.enabled=true; sendSkin(); }
+  function endStroke(){ if(drawing){ storeStroke(drawing); drawing=null; } }
+  cdraw.addEventListener('pointerdown',function(e){ e.preventDefault(); drawing={pts:[toMan(e)],w:brushW}; try{cdraw.setPointerCapture(e.pointerId);}catch(_){} });
+  cdraw.addEventListener('pointermove',function(e){ if(drawing) drawing.pts.push(toMan(e)); });
+  cdraw.addEventListener('pointerup',endStroke); cdraw.addEventListener('pointercancel',endStroke);
+  document.getElementById('cUndo').onclick=function(){ var p=drawHist.pop(); if(p&&skin.parts[p].strokes.length) skin.parts[p].strokes.pop(); sendSkin(); };
+  document.getElementById('cClear').onclick=function(){ skin=DS.skin.emptySkin(); drawHist=[]; sendSkin(); };
+  // brush-thickness slider — the dot previews the current size
+  var cBrush=document.getElementById('cBrush'), cBrushDot=document.getElementById('cBrushDot');
+  function updateBrushDot(){ var px=Math.max(5,Math.min(30,brushW*1.5)); cBrushDot.style.width=px+'px'; cBrushDot.style.height=px+'px'; }
+  cBrush.oninput=function(){ brushW=+cBrush.value||6; updateBrushDot(); };
+  updateBrushDot();
+
+  // ready toggle + phase (connecting → setup/ready → play)
+  var phase='connecting', isReady=false, starting=false;
+  var setupEl=document.getElementById('setup'), cReady=document.getElementById('cReady'), setupMe=document.getElementById('setupMe');
+  function setReady(v){ isReady=v; cReady.textContent=isReady?'✓ Ready':'Ready'; cReady.classList.toggle('on',isReady); setupEl.classList.toggle('readywait',isReady); send({ev:'ready',ready:isReady}); }
+  cReady.onclick=function(){ setReady(!isReady); };
+  function setPhase(p){ phase=p; if(p==='play'){ setupEl.classList.remove('show'); } else if(p==='setup'){ setupEl.classList.add('show'); buildUlts(); } checkOrient(); }
+  (function tick(){ if(phase==='setup') renderDraw(); requestAnimationFrame(tick); })();
+
+  // ---- unified touch manager ----
+  // Buttons are active while a finger is over them, hit-tested from the finger's CURRENT
+  // position each move — so you can SLIDE from one button to another without lifting
+  // (e.g. flick left→right). A finger that begins on the special joystick is captured by
+  // it for aiming (and won't steal/trigger buttons it passes over).
+  var dir={l:false,r:false,d:false}, sent={mx:0,my:0};
+  function updateMove(){ var mx=dir.r?1:dir.l?-1:0, my=dir.d?1:0; if(mx!==sent.mx||my!==sent.my){ sent.mx=mx; sent.my=my; send({mx:mx,my:my}); } }
+
+  var spBase=document.getElementById('spBase'), spKnob=document.getElementById('spKnob');
+  function setKnob(dx,dy){ spKnob.style.transform='translate(calc(-50% + '+dx+'px), calc(-50% + '+dy+'px))'; }
+  function fireTap(act){ if(act==='jump') sendEv('jump'); else if(act==='jab') sendEv('jab'); }
+
+  var BTNS=['arUp','arLeft','arRight','arDown','btnJumpR','btnAtk'].map(function(id){return document.getElementById(id);});
+  function ctlAt(x,y){ var el=document.elementFromPoint(x,y); var c=el&&el.closest&&el.closest('[data-hold],[data-tap],[data-joy]'); return c||null; }
+
+  var touches={}; // id -> { kind:'btn'|'joy', cur, joy }
+  function applyState(){
+    var l=false,r=false,d=false, over={};
+    for(var id in touches){ var t=touches[id]; if(t.kind==='btn'&&t.cur){ over[t.cur.id]=true; var h=t.cur.dataset.hold; if(h==='l')l=true; else if(h==='r')r=true; else if(h==='d')d=true; } }
+    BTNS.forEach(function(el){ el.classList.toggle('down', !!over[el.id]); });
+    dir.l=l; dir.r=r; dir.d=d; updateMove();
+  }
+  function setBtn(id, ctl){
+    if(ctl&&ctl.dataset.joy) ctl=null;                 // a sliding button-finger never hijacks the joystick
+    var t=touches[id]; if(!t||t.kind!=='btn'||t.cur===ctl) return;
+    var old=t.cur; t.cur=ctl;
+    if(ctl&&ctl.dataset.tap&&ctl!==old) fireTap(ctl.dataset.tap);   // tap fires on enter (incl. sliding on)
+    applyState();
+  }
+  // octagon 8-way: direction comes from where you press RELATIVE TO THE PAD CENTER (not the
+  // grab point), so the right side fires right, the left side fires left, etc. — independent of
+  // which way the fighter is looking. dir = horizontal (-1/0/1), aim = vertical (-1 up / 1 down).
+  var OCT=[[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]]; // 0=E,1=SE,2=S,…,7=NE
+  function joyStart(id,x,y){ var r=spBase.getBoundingClientRect(); touches[id].joy={cx:r.left+r.width/2,cy:r.top+r.height/2,R:r.width/2,hx:0,vy:0}; joyMove(id,x,y); }
+  function joyMove(id,x,y){ var j=touches[id].joy; var dx=x-j.cx,dy=y-j.cy, kd=Math.hypot(dx,dy);
+    var kx=dx,ky=dy; if(kd>j.R){ kx*=j.R/kd; ky*=j.R/kd; } setKnob(kx,ky);
+    if(kd < j.R*0.32){ j.hx=0; j.vy=0; spKnob.classList.remove('act'); }
+    else { var m=OCT[(Math.round(Math.atan2(dy,dx)/(Math.PI/4))+8)%8]; j.hx=m[0]; j.vy=m[1]; spKnob.classList.add('act'); } }
+  function joyEnd(id){ var j=touches[id].joy; setKnob(0,0); spKnob.classList.remove('act'); sendEv('special',{aim:j.vy,dir:j.hx}); }
+
+  function down(id,x,y){ var ctl=ctlAt(x,y);
+    if(ctl&&ctl.dataset.joy){ touches[id]={kind:'joy'}; joyStart(id,x,y); }
+    else { touches[id]={kind:'btn',cur:null}; setBtn(id,ctl); } }
+  function moveT(id,x,y){ var t=touches[id]; if(!t)return; if(t.kind==='joy') joyMove(id,x,y); else setBtn(id,ctlAt(x,y)); }
+  function upT(id){ var t=touches[id]; if(!t)return; if(t.kind==='joy') joyEnd(id); delete touches[id]; applyState(); }
+
+  var pad=document.getElementById('pad');
+  pad.addEventListener('touchstart',function(e){ for(var i=0;i<e.changedTouches.length;i++){ var t=e.changedTouches[i]; down(t.identifier,t.clientX,t.clientY); } e.preventDefault(); },{passive:false});
+  pad.addEventListener('touchmove',function(e){ for(var i=0;i<e.changedTouches.length;i++){ var t=e.changedTouches[i]; moveT(t.identifier,t.clientX,t.clientY); } e.preventDefault(); },{passive:false});
+  function tend(e){ for(var i=0;i<e.changedTouches.length;i++){ upT(e.changedTouches[i].identifier); } e.preventDefault(); }
+  pad.addEventListener('touchend',tend,{passive:false}); pad.addEventListener('touchcancel',tend,{passive:false});
+  // mouse fallback (desktop testing)
+  var mdown=false;
+  pad.addEventListener('mousedown',function(e){ mdown=true; down('m',e.clientX,e.clientY); });
+  window.addEventListener('mousemove',function(e){ if(mdown) moveT('m',e.clientX,e.clientY); });
+  window.addEventListener('mouseup',function(){ if(mdown){ mdown=false; upT('m'); } });
+
+  // ---- landscape hint ----
+  // the draw/setup screen is happy (and bigger) in portrait; nudge to landscape once the match
+  // is about to start (everyone readied → 'starting') and while the pad is up.
+  function checkOrient(){
+    var wantLandscape = (phase==='play' || starting);
+    document.getElementById('rotateMsg').textContent = starting ? "everyone's ready — turn sideways!" : 'turn your phone sideways';
+    document.getElementById('rotate').classList.toggle('show', wantLandscape && window.innerHeight>window.innerWidth);
+  }
+  window.addEventListener('resize',checkOrient); checkOrient();
+
+  msgBtn.onclick=function(){ hideMsg(); connect(); };
+  connect();
+})();
+</script>
+</body>
+</html>
