@@ -54,6 +54,7 @@
       this.ledge = null; this.ledgeCd = 0; this.ledgeLock = 0; // ledge-hang state
       this._portalCd = 0; // teleport cooldown so portals don't ping-pong
       this.lastHitBy = null; // most recent attacker, for KO attribution (score modes)
+      this.item = null;      // held power-up prop (set by a mode): { key, name, left, action }. F uses it.
       // combo + HUD juice: combo = current chain landed, comboT = window left to extend it,
       // comboFlash pops the badge on each hit, hitFlash punches the % when you take a big hit
       this.combo = 0; this.comboT = 0; this.comboFlash = 0; this.hitFlash = 0;
@@ -67,8 +68,10 @@
       if (this.ultType == null) this.ultType = 'hammer';
     }
 
-    _startAction(name) {
-      const d = this.ch.actions[name];
+    // dataOverride lets a power-up prop supply its own move data (held items) without
+    // touching the character's action table; everything downstream reads action.data.
+    _startAction(name, dataOverride) {
+      const d = dataOverride || this.ch.actions[name];
       if (!d || (!d.hit && !d.projectile && !d.boomerang)) return;
       // attacks no longer pause/cancel movement or the dash — you keep all momentum,
       // which is what makes a dash-in attack hit harder (see _takeHit)
@@ -82,13 +85,23 @@
       if (DS.Audio) {
         if (d.projectile || d.boomerang) { if (!d.ult && d.startup >= 8) DS.Audio.play('charge_up', { x: this.x, dur: d.startup / 60 }); }
         else if (d.hit) {
-          const sw = name === 'hammer' ? 'swing_hammer' : (name === 'superpunch' || name === 'ultrapunch') ? 'swing_punch'
+          const sw = name === 'hammer' || name === 'bat' ? 'swing_hammer' : (name === 'superpunch' || name === 'ultrapunch') ? 'swing_punch'
             : name === 'spear' ? 'swing_punch' : name === 'wolfslash' ? 'swing_wolf' : name === 'clawswipe' ? 'swing_claw' : 'swing_jab';
           DS.Audio.play(sw, { x: this.x });
         }
       }
     }
 
+    // use a held power-up prop: its move replaces this fighter's attack (F). Reuses the normal
+    // action machinery via a data override, decrements the prop's remaining uses, drops it at 0.
+    _useItem(world) {
+      const it = this.item, d = it.action;
+      this._startAction(d.name, d);
+      if (!this.action) return;              // safety: malformed prop, keep the item
+      this.attackCd = d.cooldown || 0.4;
+      it.left -= 1;
+      if (it.left <= 0) { this.item = null; if (world.effects) world.effects.dust(this.x, this.y, this.facing); }
+    }
     // "fast" now means real MOMENTUM (built by dashing, sustained by a jump) — not just
     // walking at run speed. plain running no longer triggers the speed moves.
     _fast() { return this.dashT > 0 || this.momentum > MOM_FAST; }
@@ -248,9 +261,15 @@
         if (d.boomerang) {
           if (!a.fired && world.spawnBoomerang) { a.fired = true; world.spawnBoomerang(this, d.boomerang, this.aimHold); }
         } else if (d.projectile) {
-          // fire once at the start of the active window, at the current aim
+          // fire once at the start of the active window, at the current aim. a prop with
+          // `pellets` fans out a spread (shotgun); otherwise it's a single shot.
           if (!a.fired && world.spawnProjectile) {
-            a.fired = true; world.spawnProjectile(this, d.projectile, this.aimHold);
+            a.fired = true;
+            const pellets = d.pellets || 1;
+            for (let k = 0; k < pellets; k++) {
+              const off = pellets > 1 ? (k - (pellets - 1) / 2) * (d.spread || 8) : 0;
+              world.spawnProjectile(this, d.projectile, (this.aimHold || 0) + off);
+            }
             if (a.name === 'supershot') world.effects.dust(this.x + this.facing * 46, this.y, this.facing); // muzzle puff
           }
         } else if (d.hit) {
@@ -390,6 +409,7 @@
       if (DS.Audio) DS.Audio.play('ko', { x: cx });
       this.action = null; this.hitstun = 0; this.vx = 0; this.vy = 0;
       this.combo = 0; this.comboT = 0; this.hitFlash = 0;
+      this.item = null; // you drop your power-up when you're KO'd
       const mode = world.game && world.game.mode;
       // let the mode score the knockout (e.g. credit the last attacker) before respawn
       if (mode && mode.onKO) mode.onKO(world.game, this);
@@ -540,7 +560,9 @@
         const wolf = this.ult && this.ult.type === 'werewolf';
         if (!this.shielding) {
           if (input.pressAttack && this.attackCd <= 0) {
-            if (wolf) {
+            if (this.item) {
+              this._useItem(world);          // a held prop hijacks your next F (bat / blaster / bomb …)
+            } else if (wolf) {
               // the werewolf KEEPS the spear (up+jab dash-up); otherwise its alternating-paw flurry
               const upRecent = (this._clock - this.lastUpPress) < SPEARWIN;
               if (!this.onGround && upRecent && !this.airSpearUsed) { this._startAction('spear'); this.attackCd = 0.2; }
@@ -706,6 +728,28 @@
         p.armBack.sh = -36 - reach * 22 * big;
         p.lean = 6 + reach * 12 * big; p.headX = 3 + reach * 3;
         p.legFront.hip = 24 + reach * 18; p.legBack.hip = -20 - reach * 10; // step into it
+      } else if (name === 'bat') {
+        // a big home-run swing synced to the bat art: coil back over the shoulder through the
+        // startup, then drive the whole body through during the active (contact) window
+        const a = this.action, d = a.data;
+        const ph = Math.min(1, a.t / ((d.startup + d.active + d.recovery) / 60));
+        const st = d.startup / (d.startup + d.active + d.recovery);
+        const ae = (d.startup + d.active) / (d.startup + d.active + d.recovery);
+        const ss = (t) => (t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t));
+        let sw; // -0.45 coiled back → 1 followed through
+        if (ph < st) sw = -0.45 * ss(ph / st);
+        else if (ph < ae) sw = -0.45 + 1.45 * ss((ph - st) / (ae - st));
+        else sw = 1;
+        p.armFront.sh = 74 + sw * 60; p.armFront.el = -10;
+        p.armBack.sh = 56 + sw * 60; p.armBack.el = -8;
+        p.lean = -10 + sw * 24; p.headX = 3;
+        p.legFront.hip = 20 + sw * 10; p.legBack.hip = -16 - sw * 6;
+      } else if (name === 'gun' || name === 'shotgun' || name === 'bomb') {
+        // brace and point the prop forward; the lead arm follows the held up/down aim
+        const aim = this.aimHold || 0;
+        p.armFront.sh = 92 + aim; p.armFront.el = -8;
+        p.armBack.sh = -30; p.lean = 8; p.headX = 4; p.headY -= aim * 0.1;
+        p.legFront.hip = 16; p.legBack.hip = -14;
       } else if (name === 'supershot') {
         // cock the throwing arm up-and-back, snap it forward as the blast fires, then settle
         const a = this.action, d = a.data;
@@ -849,6 +893,53 @@
         // ULTIMATE wind-up: hold the big blue hammer cocked back, about to be thrown as a boomerang
         ctx.save(); ctx.translate(this.x, this.y - 4);
         DS.character.weapon(ctx, 'hammer', { dir: this.facing, swing: 0.12, scale: this.scale * 1.6, color: ultCol, headFill: ultDeep });
+        ctx.restore();
+      }
+
+      // power-up props in hand (bat / blaster / scatter / bomb) — drawn for the move's lifetime
+      const idat = this.action && this.action.data;
+      if (idat && idat.weapon) {
+        const a = this.action, d = idat;
+        const ph = Math.min(1, a.t / ((d.startup + d.active + d.recovery) / 60));
+        const ss = (t) => (t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t));
+        ctx.save(); ctx.translate(this.x, this.y);
+        if (d.weapon === 'bat') {
+          // hold cocked over the shoulder through startup, then WHIP through during the active
+          // (contact) window, then settle the follow-through during recovery
+          const st = d.startup / (d.startup + d.active + d.recovery);
+          const ae = (d.startup + d.active) / (d.startup + d.active + d.recovery);
+          let sw;
+          if (ph < st) sw = ss(ph / st) * 0.08;                       // tiny wind-up, stays cocked
+          else if (ph < ae) sw = 0.08 + ss((ph - st) / (ae - st)) * 0.82; // snap through on contact
+          else sw = 0.9 + ss((ph - ae) / (1 - ae)) * 0.1;             // settle the follow-through
+          DS.character.weapon(ctx, 'bat', { dir: this.facing, swing: sw, scale: this.scale });
+        } else if (d.weapon === 'rifle' || d.weapon === 'shotgun') {
+          DS.character.weapon(ctx, d.weapon, { dir: this.facing, aim: (this.aimHold || 0) * Math.PI / 180, scale: this.scale });
+        } else if (d.weapon === 'bomb' && !a.fired) {
+          // a round bomb with a lit fuse held in the lead hand, until it's thrown
+          const rnd = DS.makeRng(9), bx = this.facing * 18, by = -8;
+          D.circle(ctx, bx, by, 11, { width: 4, color: D.COL.ink, rnd, fill: D.mix(D.COL.ink, D.COL.paper, 0.55) });
+          D.circle(ctx, bx - this.facing * 3, by - 3, 2.6, { width: 0, color: D.COL.paper, fill: D.COL.paper }); // shine
+          D.line(ctx, bx, by - 11, bx + this.facing * 6, by - 21, { width: 3, color: D.COL.accent, rnd, passes: 1 }); // fuse
+        }
+        ctx.restore();
+      } else if (this.item) {
+        // CARRIED prop: while you hold an item but aren't mid-swing, show it on the fighter
+        // (rested/ready) so it's clear you're armed until the uses run out
+        const key = this.item.key;
+        ctx.save(); ctx.translate(this.x, this.y);
+        if (key === 'bat') {
+          DS.character.weapon(ctx, 'bat', { dir: this.facing, swing: 0, scale: this.scale }); // resting over the shoulder
+        } else if (key === 'blaster') {
+          DS.character.weapon(ctx, 'rifle', { dir: this.facing, aim: -0.35, scale: this.scale }); // AK held at the ready
+        } else if (key === 'scatter') {
+          DS.character.weapon(ctx, 'shotgun', { dir: this.facing, aim: -0.35, scale: this.scale }); // shotgun held at the ready
+        } else if (key === 'bomb') {
+          const rnd = DS.makeRng(9), bx = this.facing * 18, by = -8;
+          D.circle(ctx, bx, by, 11, { width: 4, color: D.COL.ink, rnd, fill: D.mix(D.COL.ink, D.COL.paper, 0.55) });
+          D.circle(ctx, bx - this.facing * 3, by - 3, 2.6, { width: 0, color: D.COL.paper, fill: D.COL.paper });
+          D.line(ctx, bx, by - 11, bx + this.facing * 6, by - 21, { width: 3, color: D.COL.accent, rnd, passes: 1 });
+        }
         ctx.restore();
       }
 
