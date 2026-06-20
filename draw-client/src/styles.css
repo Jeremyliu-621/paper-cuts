@@ -1,0 +1,139 @@
+:root {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #1f2528;
+  background: #f7f4ec;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+}
+
+.draw-app {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  background: #f7f4ec;
+}
+
+.game-scene-frame {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  border: 0;
+  background: #f7f4ec;
+  pointer-events: none;
+  transform: translate(0, 0);
+  transform-origin: top left;
+  opacity: 0.82;
+  filter: saturate(0.92) contrast(0.96);
+}
+
+.tl-shapes {
+  background: transparent;
+}
+
+.debug-panel {
+  position: fixed;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 10px;
+  min-width: 184px;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 37, 40, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.9);
+  box-shadow: 0 8px 24px rgba(31, 37, 40, 0.12);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.debug-panel dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.debug-panel dl div {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.debug-panel dt,
+.debug-panel dd,
+.debug-panel p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.debug-panel dt {
+  color: rgba(31, 37, 40, 0.64);
+  font-weight: 650;
+}
+
+.debug-panel dd {
+  color: #1f2528;
+  font-weight: 750;
+}
+
+.debug-panel p {
+  grid-column: 1 / -1;
+  color: #a33a2a;
+  font-weight: 700;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 2px;
+  border-radius: 999px;
+  background: #8b8f91;
+}
+
+.status-connected {
+  background: #2e8b57;
+}
+
+.status-connecting,
+.status-loading {
+  background: #c58a25;
+}
+
+.status-error,
+.status-disconnected {
+  background: #ba4a38;
+}
+
+.tl-container {
+  font-family: inherit;
+}
