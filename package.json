@@ -1,0 +1,16 @@
+{
+  "name": "doodle-smash-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lobby + phone-controller relay for Doodle Smash. Serves the game, the mobile controller page, a QR endpoint, and a WebSocket relay so phones can join a lobby and drive fighters. The game itself stays zero-build and still runs from file:// for solo/keyboard play.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.3",
+    "ws": "^8.18.0"
+  }
+}
