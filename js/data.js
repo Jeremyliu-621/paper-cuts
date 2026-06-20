@@ -157,7 +157,7 @@
   function defaults() {
     const stageReference = DS.stageReference || { view: VIEW, platforms: [] };
     return {
-      version: 3,
+      version: 4,
       view: { w: VIEW.w, h: VIEW.h },
       settings: {
         gravity: 2300,
@@ -197,8 +197,9 @@
         ],
       },
       characters: {
-        Sprout: makeCharacter('Sprout', 'spikes', '#5b8c5a'),
-        Acorn: makeCharacter('Acorn', 'beanie', '#9c6b3f'),
+        // the built-in fighters are Oski the Bear (UC Berkeley's mascot) — same rig, bear head
+        Sprout: makeCharacter('Sprout', 'bear', '#5b8c5a'),
+        Acorn: makeCharacter('Acorn', 'bear', '#9c6b3f'),
       },
       roster: ['Sprout', 'Acorn'],
     };
@@ -238,7 +239,15 @@
   function mergeDefaults(d) {
     const base = defaults();
     if (!d || typeof d !== 'object') return base;
+    const targetVersion = base.version;        // capture before Object.assign overwrites base.version
     const out = Object.assign(base, d);
+    // one-time (saves before v4): the built-in fighters became Oski the Bear. flip the old
+    // built-in heads to 'bear' once, without touching characters the user deliberately changed.
+    if ((d.version || 0) < 4) {
+      if (out.characters && out.characters.Sprout && out.characters.Sprout.head === 'spikes') out.characters.Sprout.head = 'bear';
+      if (out.characters && out.characters.Acorn && out.characters.Acorn.head === 'beanie') out.characters.Acorn.head = 'bear';
+    }
+    out.version = targetVersion;
     out.settings = Object.assign(base.settings, d.settings || {});
     // blast bounds are derived from the view and not user-editable, so always take the
     // current defaults (lets existing saves pick up the bigger KO bounds)
