@@ -45,6 +45,9 @@ into `#editor-panel`.
         you **stick to the slope/curve within a step band**, so your feet follow the face up and
         down instead of floating. Drawn platforms never wall you off horizontally (shaped one-way
         surface, like a soft platform that follows the drawing). Drop-through (press down) still works.
+      - **Restyle into a type.** A selected drawn platform has a **type** picker that keeps the shape
+        but changes the look (`p.style`): `ledge` (plain), `wood` (plank seams), `stone` (courses),
+        `crystal` (accent facets) and `bouncy` (a spring that sets `p.bounce` → launches you up).
 - **Settings** — `gravity`, `timer`, `stocks`, `knockback`, `hitstop` sliders.
 
 Common buttons: **Save**, **Reset all** (defaults), **Export** (download JSON), **Import** (load

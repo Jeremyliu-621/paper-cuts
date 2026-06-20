@@ -49,43 +49,75 @@
     for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; out.push([u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]]); }
     return out;
   }
+  function lerp2(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+  // point indices spaced ~`spacing` apart along the stroke by arc length (skips the very ends)
+  function strokeMarks(top, spacing) {
+    const idx = []; let acc = spacing * 0.55;
+    for (let i = 1; i < top.length - 1; i++) { acc += Math.hypot(top[i][0] - top[i - 1][0], top[i][1] - top[i - 1][1]); if (acc >= spacing) { acc = 0; idx.push(i); } }
+    return idx;
+  }
+  // a drawn platform can be RESTYLED into different "types" in the editor while keeping its shape:
+  // 'ledge' (plain), 'wood', 'stone', 'crystal' and 'bouncy' (springs you up). All collide the same.
   function drawnPlat(ctx, p, rnd) {
     const pts = p.pts;
     if (!pts || pts.length < 2) { floatPlat(ctx, p, rnd); return; }
+    const style = p.style || 'ledge';
     const top = pts, bot = offsetAlongNormal(pts, DRAWN_TH), lip = offsetAlongNormal(pts, 8);
     const N = top.length, A = top[0], B = top[N - 1], Ab = bot[0], Bb = bot[N - 1];
-    // rounded end caps: a smooth bulge past each end (instead of a blunt straight edge), like the
-    // rounded corners on the default platforms. control points sit just beyond the ends, along the
-    // stroke's tangent there.
     const r = DRAWN_TH / 2;
     const taX = top[1][0] - A[0], taY = top[1][1] - A[1], La = Math.hypot(taX, taY) || 1;
     const tbX = B[0] - top[N - 2][0], tbY = B[1] - top[N - 2][1], Lb = Math.hypot(tbX, tbY) || 1;
     const ctrlA = [(A[0] + Ab[0]) / 2 - taX / La * r * 1.4, (A[1] + Ab[1]) / 2 - taY / La * r * 1.4];
     const ctrlB = [(B[0] + Bb[0]) / 2 + tbX / Lb * r * 1.4, (B[1] + Bb[1]) / 2 + tbY / Lb * r * 1.4];
+    const edge = (style === 'crystal' || style === 'bouncy') ? D.COL.accent : D.COL.ink;
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     const ribbon = () => {
       ctx.beginPath();
-      traceSmooth(ctx, top, true);                                  // top surface A..B
-      ctx.quadraticCurveTo(ctrlB[0], ctrlB[1], Bb[0], Bb[1]);       // rounded end cap
-      traceSmooth(ctx, bot.slice().reverse(), false);              // underside Bb..Ab
-      ctx.quadraticCurveTo(ctrlA[0], ctrlA[1], A[0], A[1]);         // rounded start cap
+      traceSmooth(ctx, top, true);
+      ctx.quadraticCurveTo(ctrlB[0], ctrlB[1], Bb[0], Bb[1]);
+      traceSmooth(ctx, bot.slice().reverse(), false);
+      ctx.quadraticCurveTo(ctrlA[0], ctrlA[1], A[0], A[1]);
       ctx.closePath();
     };
-    // soft paper-cutout shadow, offset down-right
+    // soft cutout shadow + cream body
     ctx.save(); ctx.translate(7, 10); ctx.globalAlpha = 0.1; ribbon(); ctx.fillStyle = D.COL.ink; ctx.fill(); ctx.restore();
-    // cream body
     ribbon(); ctx.fillStyle = D.COL.paper; ctx.fill();
-    // ink edges: chunky top surface, lighter bottom, rounded end caps
-    D.strokePts(ctx, top, { width: 6, color: D.COL.ink, rnd, passes: 1, jitter: 0.25 });
-    D.strokePts(ctx, bot, { width: 5, color: D.COL.ink, rnd, passes: 1, jitter: 0.25 });
-    D.strokePts(ctx, quadSample(B, ctrlB, Bb, 7), { width: 5, color: D.COL.ink, rnd, passes: 1, jitter: 0.2 });
-    D.strokePts(ctx, quadSample(Ab, ctrlA, A, 7), { width: 5, color: D.COL.ink, rnd, passes: 1, jitter: 0.2 });
-    // a faint "lip" line just under the surface for the 3-D ledge read (parallel to the top)
-    ctx.globalAlpha = 0.4;
-    D.strokePts(ctx, lip, { width: 2.5, color: D.COL.ink, passes: 1 });
-    ctx.globalAlpha = 1;
+    if (style === 'crystal' || style === 'bouncy') { ribbon(); ctx.globalAlpha = 0.08; ctx.fillStyle = edge; ctx.fill(); ctx.globalAlpha = 1; }
+    // chunky edges + rounded caps
+    D.strokePts(ctx, top, { width: 6, color: edge, rnd, passes: 1, jitter: 0.25 });
+    D.strokePts(ctx, bot, { width: 5, color: edge, rnd, passes: 1, jitter: 0.25 });
+    D.strokePts(ctx, quadSample(B, ctrlB, Bb, 7), { width: 5, color: edge, rnd, passes: 1, jitter: 0.2 });
+    D.strokePts(ctx, quadSample(Ab, ctrlA, A, 7), { width: 5, color: edge, rnd, passes: 1, jitter: 0.2 });
+    ctx.globalAlpha = 0.4; D.strokePts(ctx, lip, { width: 2.5, color: edge, passes: 1 }); ctx.globalAlpha = 1;
+
+    // ---- per-type decoration (follows the curve) ----
+    if (style === 'wood') {
+      strokeMarks(top, 92).forEach((i) => {
+        D.strokePts(ctx, [lerp2(top[i], bot[i], 0.12), lerp2(top[i], bot[i], 0.88)], { width: 2.5, color: D.COL.ink, rnd, passes: 1 }); // plank seam
+        const nd = lerp2(top[i], bot[i], 0.2); ctx.fillStyle = D.COL.ink; ctx.beginPath(); ctx.arc(nd[0], nd[1], 2.2, 0, 7); ctx.fill(); // nail
+      });
+    } else if (style === 'stone') {
+      const mid = offsetAlongNormal(pts, r);
+      ctx.globalAlpha = 0.6; D.strokePts(ctx, mid, { width: 2, color: D.COL.ink, passes: 1 }); ctx.globalAlpha = 1; // course seam
+      strokeMarks(top, 84).forEach((i, k) => { // staggered short joints, brick-like
+        const a = k % 2 ? lerp2(top[i], bot[i], 0.5) : lerp2(top[i], bot[i], 0.08), b = k % 2 ? lerp2(top[i], bot[i], 0.92) : lerp2(top[i], bot[i], 0.5);
+        ctx.globalAlpha = 0.6; D.strokePts(ctx, [a, b], { width: 2.2, color: D.COL.ink, rnd, passes: 1 }); ctx.globalAlpha = 1;
+      });
+    } else if (style === 'crystal') {
+      strokeMarks(top, 74).forEach((i) => { // facets poking up from the surface
+        let ux = top[i][0] - bot[i][0], uy = top[i][1] - bot[i][1]; const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul; // up-normal
+        const tg = lerp2(top[Math.max(0, i - 1)], top[Math.min(N - 1, i + 1)], 0.5); let tx = top[Math.min(N - 1, i + 1)][0] - top[Math.max(0, i - 1)][0], ty = top[Math.min(N - 1, i + 1)][1] - top[Math.max(0, i - 1)][1]; const tl = Math.hypot(tx, ty) || 1; tx /= tl; ty /= tl;
+        const up = 11 + rnd() * 9, apex = [top[i][0] + ux * up, top[i][1] + uy * up];
+        D.strokePts(ctx, [[top[i][0] - tx * 8, top[i][1] - ty * 8], apex, [top[i][0] + tx * 8, top[i][1] + ty * 8]], { width: 3, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
+        D.line(ctx, apex[0], apex[1], top[i][0], top[i][1], { width: 1.6, color: D.COL.accent, passes: 1 });
+      });
+    } else if (style === 'bouncy') {
+      // springy zigzag along the underside
+      const zig = []; for (let i = 0; i < N; i++) zig.push(lerp2(top[i], bot[i], i % 2 ? 0.78 : 1.0));
+      D.strokePts(ctx, zig, { width: 3, color: D.COL.accent, rnd, passes: 1, jitter: 0.3 });
+    }
     ctx.restore();
   }
 

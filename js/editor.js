@@ -298,6 +298,19 @@
     }
 
     _buildPlatProps(p, st, pl) {
+      // a DRAWN platform keeps its shape (drag to move / corner to resize on the canvas) — here it
+      // gets a "type" that restyles it (and Bouncy makes it springy), not the rectangle kinds.
+      if (pl.kind === 'drawn') {
+        p.appendChild(el('h3', '', 'Drawn platform'));
+        const trow = el('div', 'ed-row'); trow.appendChild(el('label', '', 'type'));
+        const tsel = el('select');
+        [['ledge', 'Ledge'], ['wood', 'Wood'], ['stone', 'Stone'], ['crystal', 'Crystal'], ['bouncy', 'Bouncy']].forEach(([v, label]) => { const o = el('option', '', label); o.value = v; if ((pl.style || 'ledge') === v) o.selected = true; tsel.appendChild(o); });
+        tsel.onchange = () => { pl.style = tsel.value; if (pl.style === 'bouncy') { if (pl.bounce == null) pl.bounce = 1300; } else delete pl.bounce; this.queueSave(); this.build(); };
+        trow.appendChild(tsel); p.appendChild(trow);
+        if (pl.style === 'bouncy') this._slider(p, 'bounce', 400, 2200, 20, () => pl.bounce, (v) => pl.bounce = v);
+        p.appendChild(el('div', 'ed-note', 'Keeps its drawn shape; the type changes how it looks. Bouncy springs you up. Drag it on the canvas to move; drag the corner to resize.'));
+        return;
+      }
       p.appendChild(el('h3', '', 'Selected platform'));
       this._num(p, 'x', 1, () => Math.round(pl.x), (v) => pl.x = v);
       this._num(p, 'y', 1, () => Math.round(pl.y), (v) => pl.y = v);
@@ -306,7 +319,7 @@
       // kind — also turns a platform into a cannon / trampoline (and back)
       const krow = el('div', 'ed-row'); krow.appendChild(el('label', '', 'kind'));
       const ksel = el('select');
-      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline', 'drawn', 'spikes'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
+      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline', 'spikes'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
       ksel.onchange = () => {
         const k = ksel.value; pl.kind = k;
         if (k === 'cannon') { if (!pl.fire) pl.fire = { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 }; pl.pass = false; } else delete pl.fire;
