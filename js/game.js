@@ -468,9 +468,43 @@
           }
         }
         if (struck) continue;
-        // fizzle on a solid platform (and chip a breakable crate/structure on the way out)
+        // hit a solid platform. a `bounce` projectile (the bomb) RICOCHETS off the surface
+        // Mario-style — reflecting its velocity with restitution — until its bounces run out;
+        // everything else just fizzles. (pass-through platforms are ignored either way.)
         for (const p of plats) {
-          if (!p.pass && pr.x > p.x && pr.x < p.x + p.w && pr.y > p.y && pr.y < p.y + p.h) {
+          if (p.pass) continue;
+          const maxB = pr.cfg.bounce || 0;
+          if (maxB) {
+            // circle-vs-AABB so the ball ricochets off the face instead of sinking in
+            const cx = Math.max(p.x, Math.min(pr.x, p.x + p.w));
+            const cy = Math.max(p.y, Math.min(pr.y, p.y + p.h));
+            let dx = pr.x - cx, dy = pr.y - cy;
+            const inside = dx * dx + dy * dy < 1e-6;
+            if (!inside && dx * dx + dy * dy > pr.r * pr.r) continue; // no contact this frame
+            if (p._hp != null) this.damageBox(p, pr.cfg.damage || 6);  // still chips crates
+            if ((pr.bounced || 0) < maxB) {
+              pr.bounced = (pr.bounced || 0) + 1;
+              let n;
+              if (inside) { // deep penetration: eject out the shallowest face
+                const toL = pr.x - p.x, toR = p.x + p.w - pr.x, toT = pr.y - p.y, toB = p.y + p.h - pr.y, m = Math.min(toL, toR, toT, toB);
+                if (m === toT) { n = { x: 0, y: -1 }; pr.y = p.y - pr.r; }
+                else if (m === toB) { n = { x: 0, y: 1 }; pr.y = p.y + p.h + pr.r; }
+                else if (m === toL) { n = { x: -1, y: 0 }; pr.x = p.x - pr.r; }
+                else { n = { x: 1, y: 0 }; pr.x = p.x + p.w + pr.r; }
+              } else {
+                const len = Math.hypot(dx, dy) || 1; n = { x: dx / len, y: dy / len };
+                pr.x = cx + n.x * pr.r; pr.y = cy + n.y * pr.r; // sit on the surface
+              }
+              const REST = 0.84, vdotn = pr.vx * n.x + pr.vy * n.y;
+              pr.vx = (pr.vx - 2 * vdotn * n.x) * REST;
+              pr.vy = (pr.vy - 2 * vdotn * n.y) * REST;
+              this.effects.impact(pr.x, pr.y, 0.4); this.effects.shake(0.08);
+              if (DS.Audio) DS.Audio.play('box_hit', { x: pr.x });
+              struck = true; break;
+            }
+            // out of bounces → detonate where it lands
+            this.effects.impact(pr.x, pr.y, 0.7); pr.dead = true; struck = true; break;
+          } else if (pr.x > p.x && pr.x < p.x + p.w && pr.y > p.y && pr.y < p.y + p.h) {
             if (p._hp != null) this.damageBox(p, pr.cfg.damage || 6);
             else if (DS.Audio) DS.Audio.play('fizzle', { x: pr.x });
             this.effects.impact(pr.x, pr.y, 0.4); pr.dead = true; struck = true; break;
