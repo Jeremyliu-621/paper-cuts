@@ -69,7 +69,9 @@ Meadow (no bounds) keeps the shared `settings.blast`. `Game.blast`/`Game.bounds`
 
 ### Dynamic platforms & breakables
 Platform objects gained optional fields (absent = a plain static platform):
-- `kind`: `ground | float | wood | stone | crystal | box` — picks the look in `js/stage.js` (`PLAT`).
+- `kind`: `ground | float | wood | stone | crystal | box | spikes` — picks the look in `js/stage.js` (`PLAT`).
+- `hurt`: `{ damage, kbBase, kbScale, cooldown }` on a `kind:'spikes'` slab — touching it deals heavy
+  damage + knockback (`Game._updateStage`, no attacker, per-fighter cooldown, then launches you off).
 - `move`: `{ type:'swing', pivotX, pivotY, len, arc, period, phase }` (pendulum) or
   `{ type:'linear', ax, ay, bx, by, period, phase }` (ping-pong). `Game._updateStage` repositions it
   each frame and **carries any rider** (a fighter whose `ground === plat`) by the same delta.

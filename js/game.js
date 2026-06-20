@@ -123,6 +123,9 @@
         if (p.hp != null) p._hp = p.hp;
         if (p.move) this._posMove(p, 0);
         if (p.fire) { p._fireT = p.fire.delay != null ? p.fire.delay : 0; p._flash = 0; } // cannons stagger via delay
+        // a spikes platform is a stage hazard — fill in its damage/knockback config (merge so a
+        // map/editor can override any field). Contact handling lives in `_updateStage`.
+        if (p.kind === 'spikes') p.hurt = Object.assign({ damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 }, p.hurt || {});
         // a hand-drawn platform collides as the stroke itself → world-space line segments
         if (p.kind === 'drawn' && p.pts && p.pts.length > 1) {
           p._segs = [];
@@ -221,6 +224,24 @@
               break;
             }
           }
+        }
+      }
+      // spikes: a hazard platform that hurts anyone touching it. Heavy damage + knockback on a
+      // per-fighter cooldown, routed through the normal hit pipeline with no attacker, then the
+      // fighter is launched up and away off the slab (so they don't sit in it).
+      for (const f of this.fighters) if (f._hurtCd > 0) f._hurtCd -= dt;
+      for (const p of st.platforms) {
+        if (p.kind !== 'spikes' || !p.hurt) continue;
+        const top = p.y - 16; // reach up to the spike tips above the slab
+        for (const f of this.fighters) {
+          if (f.dead || f.respawnT > 0 || f.invuln > 0 || f._hurtCd > 0) continue;
+          const hw = f.w / 2, hh = f.h / 2;
+          if (f.x + hw <= p.x || f.x - hw >= p.x + p.w || f.y + hh <= top || f.y - hh >= p.y + p.h) continue;
+          const h = p.hurt, dir = f.x < p.x + p.w / 2 ? -1 : 1; // fling away from the slab's centre
+          f._hurtCd = h.cooldown != null ? h.cooldown : 0.6;
+          f._takeHit({ damage: h.damage, kbBase: h.kbBase, kbScale: h.kbScale, angle: 72 }, dir, null, this.world);
+          this.effects.groundSpikes(Math.max(p.x, Math.min(p.x + p.w, f.x)), p.y, 1.1);
+          this.effects.shake(0.4);
         }
       }
     }

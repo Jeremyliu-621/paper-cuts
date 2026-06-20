@@ -247,6 +247,7 @@
       mkb('+ platform', () => this._addPlat(st, {}));
       mkb('+ cannon', () => this._addPlat(st, { w: 86, h: 52, kind: 'cannon', pass: false, fire: { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 } }));
       mkb('+ bouncy', () => this._addPlat(st, { w: 360, h: 60, kind: 'trampoline', pass: false, bounce: 1300 }));
+      mkb('+ spikes', () => this._addPlat(st, { w: 260, h: 44, kind: 'spikes', pass: false, hurt: { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 } }));
       mkb('+ portal', () => this._addPortalPair(st));
       mkb('− selected', () => {
         if (this.selPortal) { const pt = this.selPortal; st.portals = (st.portals || []).filter((q) => q !== pt && q.id !== pt.link && q.link !== pt.id); this.selPortal = null; }
@@ -305,11 +306,12 @@
       // kind — also turns a platform into a cannon / trampoline (and back)
       const krow = el('div', 'ed-row'); krow.appendChild(el('label', '', 'kind'));
       const ksel = el('select');
-      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline', 'drawn'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
+      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline', 'drawn', 'spikes'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
       ksel.onchange = () => {
         const k = ksel.value; pl.kind = k;
         if (k === 'cannon') { if (!pl.fire) pl.fire = { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 }; pl.pass = false; } else delete pl.fire;
         if (k === 'trampoline') { if (pl.bounce == null) pl.bounce = 1300; pl.pass = false; } else delete pl.bounce;
+        if (k === 'spikes') { if (!pl.hurt) pl.hurt = { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 }; pl.pass = false; } else delete pl.hurt;
         this.queueSave(); this.build();
       };
       krow.appendChild(ksel); p.appendChild(krow);
@@ -333,6 +335,14 @@
         p.appendChild(el('h3', '', 'Trampoline'));
         this._slider(p, 'bounce', 400, 2200, 20, () => pl.bounce, (v) => pl.bounce = v);
         p.appendChild(el('div', 'ed-note', 'Minimum launch height; a harder landing still flings you higher.'));
+      }
+      if (pl.hurt) {
+        p.appendChild(el('h3', '', 'Spikes (hazard)'));
+        this._slider(p, 'damage', 1, 60, 1, () => pl.hurt.damage, (v) => pl.hurt.damage = v);
+        this._slider(p, 'knockback', 4, 80, 1, () => pl.hurt.kbBase, (v) => pl.hurt.kbBase = v);
+        this._slider(p, 'kb growth', 0, 0.4, 0.01, () => pl.hurt.kbScale, (v) => pl.hurt.kbScale = v);
+        this._slider(p, 'hit cooldown (s)', 0.1, 2, 0.05, () => pl.hurt.cooldown, (v) => pl.hurt.cooldown = v);
+        p.appendChild(el('div', 'ed-note', 'Touching this platform deals heavy damage + knockback, then flings the fighter off.'));
       }
       if (pl.move) p.appendChild(el('div', 'ed-note', 'This platform MOVES (' + pl.move.type + '); its motion path is preset.'));
     }

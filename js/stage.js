@@ -240,6 +240,30 @@
     ctx.restore();
   }
 
+  // a hazard slab bristling with sharp spikes — touching it deals heavy damage + knockback
+  // (applied in game.js `_updateStage`). Drawn in ink with a thin accent glint up each spike so
+  // it reads "do not touch", matching the crystal/trampoline use of accent for special tiles.
+  function spikesPlat(ctx, p, rnd) {
+    const r = Math.min(p.h / 2, 9);
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.paper });
+    // diagonal hazard hatching across the body
+    ctx.save(); ctx.globalAlpha = 0.3; ctx.strokeStyle = D.COL.ink; ctx.lineWidth = 2.4; ctx.lineCap = 'round';
+    for (let x = p.x + 12; x < p.x + p.w - 4; x += 26) {
+      ctx.beginPath(); ctx.moveTo(x, p.y + p.h - 5); ctx.lineTo(x + 15, p.y + 7); ctx.stroke();
+    }
+    ctx.restore();
+    // a row of sharp triangular spikes poking up along the top edge (paper-filled so they occlude)
+    const n = Math.max(3, Math.round(p.w / 34)), base = p.y + 3;
+    const half = (p.w - 16) / Math.max(1, n - 1) / 2 + 2;
+    for (let i = 0; i < n; i++) {
+      const x = p.x + 8 + (p.w - 16) * (i / Math.max(1, n - 1)), up = 22 + rnd() * 8;
+      D.strokePts(ctx, [[x - half, base], [x, base - up], [x + half, base]], { width: 3.5, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
+      ctx.globalAlpha = 0.8;
+      D.line(ctx, x, base - up + 5, x, base - 2, { width: 1.8, color: D.COL.accent, passes: 1 }); // danger glint
+      ctx.globalAlpha = 1;
+    }
+  }
+
   // a cannon on a stone mount; barrel points along its fire angle, flashes when it fires
   function cannonPlat(ctx, p, rnd) {
     stonePlat(ctx, p, rnd);
@@ -273,7 +297,7 @@
     ctx.restore(); ctx.globalAlpha = 1;
   }
 
-  const PLAT = { ground: groundPlat, float: floatPlat, wood: woodPlat, stone: stonePlat, crystal: crystalPlat, box: boxPlat, trampoline: trampolinePlat, cannon: cannonPlat, drawn: drawnPlat };
+  const PLAT = { ground: groundPlat, float: floatPlat, wood: woodPlat, stone: stonePlat, crystal: crystalPlat, box: boxPlat, trampoline: trampolinePlat, cannon: cannonPlat, drawn: drawnPlat, spikes: spikesPlat };
 
   // ropes for a swinging platform — drawn behind the plank
   function ropes(ctx, p) {

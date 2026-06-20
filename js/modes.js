@@ -330,7 +330,7 @@
       // raking the floor, breakable cover, AND a portal pair across the whole arena. Go nuts.
       chaos: {
         id: 'chaos', name: 'Pandemonium',
-        desc: 'Everything at once: a trampoline pit launching you skyward, a cannon raking the floor, crates to smash for cover, and a portal pair spanning the arena. Pure chaos.',
+        desc: 'Everything at once: a trampoline pit launching you skyward, a cannon raking the floor, crates to smash for cover, a bed of spikes to dodge, and a portal pair spanning the arena. Pure chaos.',
         build() {
           return {
             bounds: { x0: -520, y0: -560, x1: 3360, y1: 1380 },
@@ -348,6 +348,7 @@
               { x: 300, y: 880, w: 84, h: 84, kind: 'box', pass: false, hp: 4 }, // cover
               { x: 2620, y: 880, w: 84, h: 84, kind: 'box', pass: false, hp: 4 },
               { x: 2536, y: 880, w: 84, h: 84, kind: 'box', pass: false, hp: 3 },
+              { x: 2130, y: 952, w: 300, h: 48, kind: 'spikes', pass: false, hurt: { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 } }, // a bed of spikes on the right ground
             ],
             portals: [
               { id: 'x', link: 'y', x: -120, y: 880, r: 72, col: '#3f8f86' },

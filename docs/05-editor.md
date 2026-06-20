@@ -18,7 +18,7 @@ into `#editor-panel`.
 - **Stage** — pick **any map** from the `Map` dropdown and edit it (not just Meadow). Drag platforms
   to move; drag a platform's bottom-right corner to resize; drag the dotted circles to move spawns;
   **↺ Reset this stage** restores the map's built-in layout. Selected platform has numeric x/y/w/h, a
-  `kind` (ground/wood/stone/crystal/box/float/**cannon/trampoline**), `pass-through`, and
+  `kind` (ground/wood/stone/crystal/box/float/**cannon/trampoline/spikes**), `pass-through`, and
   `breakable hp` (0 = solid). The canvas auto-frames the whole selected map (presets can be far
   wider than the 1920×1080 view), with a dashed guide showing the map's play-bounds.
   - **Gimmicks** are addable/removable/resizable like platforms:
@@ -29,6 +29,11 @@ into `#editor-panel`.
     - **+ portal** — a linked **pair** of teleport portals; drag to move, drag the bottom **nub**
       to resize the radius, pick a colour, and **− selected** removes the whole pair. Portals live
       in `stage.portals` (`{id, link, x, y, r, col}`).
+    - **+ spikes** — a hazard slab (`kind:'spikes'`, with a `hurt` config). **Touching it deals
+      heavy damage + knockback** (`_updateStage` routes contact through the normal hit pipeline with
+      no attacker, on a per-fighter cooldown, then flings the fighter up and off the slab). Controls
+      for **damage / knockback / kb growth / hit cooldown**. (Or set any platform's `kind` to
+      `spikes`.) A live example sits on the **Pandemonium** map.
     - **✎ Draw a platform** — toggle on, then **trace a squiggle** on the stage and it becomes a
       `kind:'drawn'` platform (`pts`, relative to the platform's top-left). It renders as a chunky
       ledge: the stroke is the **top surface**, with a paper body extruded down (`DRAWN_TH`), ink
