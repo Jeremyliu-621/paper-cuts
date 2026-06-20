@@ -15,8 +15,78 @@
     const rnd = DS.makeRng(p._seed != null ? p._seed : DS.hashSeed('p' + p.x + '_' + p.y + '_' + p.w));
     const kind = p.kind || (p.pass ? 'float' : 'ground');
     const fn = PLAT[kind] || PLAT.float;
-    dropShadow(ctx, p);   // soft paper-cutout shadow → the platform reads as floating above the field
+    if (kind !== 'drawn') dropShadow(ctx, p); // a 'drawn' squiggle draws its own soft shadow
     fn(ctx, p, rnd);
+  }
+
+  // a hand-drawn platform: the traced stroke is the TOP surface; the body is extruded along the
+  // stroke's PERPENDICULAR (not straight down) so the thickness is CONSTANT everywhere — a steep
+  // or curved stretch is just as chunky as a flat one (same heft as a Meadow float), instead of
+  // thinning to a slanted-pen sliver. pts are stored relative to p.x/p.y.
+  const DRAWN_TH = 38; // body thickness ≈ a Meadow float platform (must match the editor bbox pad)
+  function traceSmooth(ctx, pts, startMove) {
+    if (startMove) ctx.moveTo(pts[0][0], pts[0][1]); else ctx.lineTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i][0] + pts[i + 1][0]) / 2, my = (pts[i][1] + pts[i + 1][1]) / 2;
+      ctx.quadraticCurveTo(pts[i][0], pts[i][1], mx, my);
+    }
+    const last = pts[pts.length - 1]; ctx.lineTo(last[0], last[1]);
+  }
+  // each point offset by `d` along its downward-facing normal (perpendicular to the local tangent)
+  function offsetAlongNormal(pts, d) {
+    const n = pts.length, out = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+      let tx = b[0] - a[0], ty = b[1] - a[1]; const L = Math.hypot(tx, ty) || 1; tx /= L; ty /= L;
+      let nx = -ty, ny = tx; if (ny < 0) { nx = -nx; ny = -ny; } // face "down" (+y)
+      out.push([pts[i][0] + nx * d, pts[i][1] + ny * d]);
+    }
+    return out;
+  }
+  // sample a quadratic Bézier p0->p1 (control c) into n+1 points (for stroking a rounded cap)
+  function quadSample(p0, c, p1, n) {
+    const out = [];
+    for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; out.push([u * u * p0[0] + 2 * u * t * c[0] + t * t * p1[0], u * u * p0[1] + 2 * u * t * c[1] + t * t * p1[1]]); }
+    return out;
+  }
+  function drawnPlat(ctx, p, rnd) {
+    const pts = p.pts;
+    if (!pts || pts.length < 2) { floatPlat(ctx, p, rnd); return; }
+    const top = pts, bot = offsetAlongNormal(pts, DRAWN_TH), lip = offsetAlongNormal(pts, 8);
+    const N = top.length, A = top[0], B = top[N - 1], Ab = bot[0], Bb = bot[N - 1];
+    // rounded end caps: a smooth bulge past each end (instead of a blunt straight edge), like the
+    // rounded corners on the default platforms. control points sit just beyond the ends, along the
+    // stroke's tangent there.
+    const r = DRAWN_TH / 2;
+    const taX = top[1][0] - A[0], taY = top[1][1] - A[1], La = Math.hypot(taX, taY) || 1;
+    const tbX = B[0] - top[N - 2][0], tbY = B[1] - top[N - 2][1], Lb = Math.hypot(tbX, tbY) || 1;
+    const ctrlA = [(A[0] + Ab[0]) / 2 - taX / La * r * 1.4, (A[1] + Ab[1]) / 2 - taY / La * r * 1.4];
+    const ctrlB = [(B[0] + Bb[0]) / 2 + tbX / Lb * r * 1.4, (B[1] + Bb[1]) / 2 + tbY / Lb * r * 1.4];
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    const ribbon = () => {
+      ctx.beginPath();
+      traceSmooth(ctx, top, true);                                  // top surface A..B
+      ctx.quadraticCurveTo(ctrlB[0], ctrlB[1], Bb[0], Bb[1]);       // rounded end cap
+      traceSmooth(ctx, bot.slice().reverse(), false);              // underside Bb..Ab
+      ctx.quadraticCurveTo(ctrlA[0], ctrlA[1], A[0], A[1]);         // rounded start cap
+      ctx.closePath();
+    };
+    // soft paper-cutout shadow, offset down-right
+    ctx.save(); ctx.translate(7, 10); ctx.globalAlpha = 0.1; ribbon(); ctx.fillStyle = D.COL.ink; ctx.fill(); ctx.restore();
+    // cream body
+    ribbon(); ctx.fillStyle = D.COL.paper; ctx.fill();
+    // ink edges: chunky top surface, lighter bottom, rounded end caps
+    D.strokePts(ctx, top, { width: 6, color: D.COL.ink, rnd, passes: 1, jitter: 0.25 });
+    D.strokePts(ctx, bot, { width: 5, color: D.COL.ink, rnd, passes: 1, jitter: 0.25 });
+    D.strokePts(ctx, quadSample(B, ctrlB, Bb, 7), { width: 5, color: D.COL.ink, rnd, passes: 1, jitter: 0.2 });
+    D.strokePts(ctx, quadSample(Ab, ctrlA, A, 7), { width: 5, color: D.COL.ink, rnd, passes: 1, jitter: 0.2 });
+    // a faint "lip" line just under the surface for the 3-D ledge read (parallel to the top)
+    ctx.globalAlpha = 0.4;
+    D.strokePts(ctx, lip, { width: 2.5, color: D.COL.ink, passes: 1 });
+    ctx.globalAlpha = 1;
+    ctx.restore();
   }
 
   // Depth cue that fits a pure side-on view: a faint dark silhouette offset down-and-right behind
@@ -203,7 +273,7 @@
     ctx.restore(); ctx.globalAlpha = 1;
   }
 
-  const PLAT = { ground: groundPlat, float: floatPlat, wood: woodPlat, stone: stonePlat, crystal: crystalPlat, box: boxPlat, trampoline: trampolinePlat, cannon: cannonPlat };
+  const PLAT = { ground: groundPlat, float: floatPlat, wood: woodPlat, stone: stonePlat, crystal: crystalPlat, box: boxPlat, trampoline: trampolinePlat, cannon: cannonPlat, drawn: drawnPlat };
 
   // ropes for a swinging platform — drawn behind the plank
   function ropes(ctx, p) {

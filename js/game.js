@@ -123,6 +123,13 @@
         if (p.hp != null) p._hp = p.hp;
         if (p.move) this._posMove(p, 0);
         if (p.fire) { p._fireT = p.fire.delay != null ? p.fire.delay : 0; p._flash = 0; } // cannons stagger via delay
+        // a hand-drawn platform collides as the stroke itself → world-space line segments
+        if (p.kind === 'drawn' && p.pts && p.pts.length > 1) {
+          p._segs = [];
+          for (let k = 0; k < p.pts.length - 1; k++) {
+            p._segs.push({ ax: p.x + p.pts[k][0], ay: p.y + p.pts[k][1], bx: p.x + p.pts[k + 1][0], by: p.y + p.pts[k + 1][1] });
+          }
+        }
       });
       const b = st.bounds || { x0: 0, y0: 0, x1: v.w, y1: v.h };
       this.bounds = b;

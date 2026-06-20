@@ -29,6 +29,17 @@ into `#editor-panel`.
     - **+ portal** — a linked **pair** of teleport portals; drag to move, drag the bottom **nub**
       to resize the radius, pick a colour, and **− selected** removes the whole pair. Portals live
       in `stage.portals` (`{id, link, x, y, r, col}`).
+    - **✎ Draw a platform** — toggle on, then **trace a squiggle** on the stage and it becomes a
+      `kind:'drawn'` platform (`pts`, relative to the platform's top-left). It renders as a chunky
+      ledge: the stroke is the **top surface**, with a paper body extruded down (`DRAWN_TH`), ink
+      top/bottom edges, end caps, a top lip and a soft shadow. It moves / resizes (the squiggle
+      scales with the box) / deletes like any platform.
+      - **Collision follows the actual shape.** `_prepareStage` turns the stroke into world-space
+        line segments (`p._segs`); `physics.step` treats them as **one-way surfaces** — you land on
+        any part from above (so a **C-shape's top arc *and* lower arc both work**), and once standing
+        you **stick to the slope/curve within a step band**, so your feet follow the face up and
+        down instead of floating. Drawn platforms never wall you off horizontally (shaped one-way
+        surface, like a soft platform that follows the drawing). Drop-through (press down) still works.
 - **Settings** — `gravity`, `timer`, `stocks`, `knockback`, `hitstop` sliders.
 
 Common buttons: **Save**, **Reset all** (defaults), **Export** (download JSON), **Import** (load

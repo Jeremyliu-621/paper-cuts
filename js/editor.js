@@ -19,6 +19,7 @@
       this.editMap = game.mapId || 'meadow'; // which stage the Stage tab edits (any map, not just Meadow)
       this._sv = null;                        // stage-tab view transform (fits the whole selected map)
       this.selPlat = null; this.selPortal = null; this.drag = null;
+      this.platDraw = false; this.platStroke = null; // freehand "draw a platform" mode
       this._saveTimer = 0;
       // draw-tool state
       this.brush = 5; this.drawMode = 'auto'; this.draw = null; this.strokeHistory = [];
@@ -234,6 +235,13 @@
       const st = this._stage();
       p.appendChild(el('div', 'ed-note', 'Add / drag / resize platforms AND gimmicks (cannons, trampolines, portals). Drag a platform’s bottom-right corner (or a portal’s nub) to resize. Drag spawns (dotted circles). Edits are saved and used in matches.'));
 
+      // freehand draw-a-platform toggle (drag a squiggle on the stage → it becomes a platform)
+      const drawRow = el('div', 'ed-btns');
+      const drawBtn = el('button', this.platDraw ? 'on' : '', this.platDraw ? '✎ Drawing… (tap to stop)' : '✎ Draw a platform');
+      drawBtn.onclick = () => { this.platDraw = !this.platDraw; this.platStroke = null; if (this.platDraw) { this.selPlat = null; this.selPortal = null; } this.build(); };
+      drawRow.appendChild(drawBtn); p.appendChild(drawRow);
+      if (this.platDraw) p.appendChild(el('div', 'ed-note', 'Drag right on the stage to trace a platform — your squiggle becomes a ledge you can stand on. Tap the button again to stop.'));
+
       const addr = el('div', 'ed-btns');
       const mkb = (label, fn) => { const b = el('button', '', label); b.onclick = fn; addr.appendChild(b); };
       mkb('+ platform', () => this._addPlat(st, {}));
@@ -262,6 +270,22 @@
       pl.x = Math.round(cx - pl.w / 2); pl.y = Math.round(cy - pl.h / 2);
       st.platforms.push(pl); this.selPlat = pl; this.selPortal = null; this.queueSave(); this.build();
     }
+    // turn a traced squiggle into a platform: AABB = stroke bbox (the physics box), and the stroke
+    // (stored relative to that box) is what gets drawn. Defaults to pass-through so its irregular
+    // shape never makes an invisible side-wall — you simply land on top.
+    _finishPlatStroke(st) {
+      const s = this.platStroke; this.platStroke = null;
+      if (!s || s.pts.length < 2) return;
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const [x, y] of s.pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+      const padX = 24;
+      x0 -= padX; x1 += padX; y0 -= 20; y1 += 50; // pad covers the perpendicular body + rounded end caps
+      const w = Math.max(24, x1 - x0), h = Math.max(14, y1 - y0);
+      if ((x1 - x0) < 16 && (y1 - y0) < 16) { this.build(); return; } // ignore an accidental dot
+      const pl = { x: Math.round(x0), y: Math.round(y0), w: Math.round(w), h: Math.round(h), pass: true, kind: 'drawn',
+        pts: s.pts.map(([x, y]) => [Math.round(x - x0), Math.round(y - y0)]) };
+      st.platforms.push(pl); this.selPlat = pl; this.selPortal = null; this.queueSave(); this.build();
+    }
     _uid(st) { let id; do { id = 'p' + Math.floor(Math.random() * 1e6); } while ((st.portals || []).some((q) => q.id === id)); return id; }
     _addPortalPair(st) {
       const ex = this._ext(st), cx = (ex.x0 + ex.x1) / 2, cy = (ex.y0 + ex.y1) / 2;
@@ -281,7 +305,7 @@
       // kind — also turns a platform into a cannon / trampoline (and back)
       const krow = el('div', 'ed-row'); krow.appendChild(el('label', '', 'kind'));
       const ksel = el('select');
-      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
+      ['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'cannon', 'trampoline', 'drawn'].forEach((k) => { const o = el('option', '', k); o.value = k; if ((pl.kind || 'wood') === k) o.selected = true; ksel.appendChild(o); });
       ksel.onchange = () => {
         const k = ksel.value; pl.kind = k;
         if (k === 'cannon') { if (!pl.fire) pl.fire = { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 }; pl.pass = false; } else delete pl.fire;
@@ -387,6 +411,8 @@
         if (this.subtab !== 'stage') return;
         const st = this._stage(), sv = this._sv || { scale: 1 };
         const m = this._toStage(e);
+        // freehand draw mode: trace a platform instead of selecting/dragging
+        if (this.platDraw) { this.platStroke = { pts: [[m.x, m.y]] }; try { cv.setPointerCapture(e.pointerId); } catch (_) {} return; }
         const hr = 16 / sv.scale; // handle hit-radius in world units (~constant on screen)
         // portals first (drag to move, or grab the radius nub at the bottom to resize)
         for (const pt of st.portals || []) {
@@ -405,7 +431,8 @@
           if (m.x >= pl.x && m.x <= pl.x + pl.w && m.y >= pl.y && m.y <= pl.y + pl.h) {
             this.selPlat = pl; this.selPortal = null;
             const corner = Math.hypot(pl.x + pl.w - m.x, pl.y + pl.h - m.y) < 18 / sv.scale;
-            this.drag = { mode: corner ? 'resize' : 'move', t: pl, dx: m.x - pl.x, dy: m.y - pl.y };
+            this.drag = { mode: corner ? 'resize' : 'move', t: pl, dx: m.x - pl.x, dy: m.y - pl.y,
+              ow: pl.w, oh: pl.h, opts: (pl.kind === 'drawn' && pl.pts) ? pl.pts.map((q) => q.slice()) : null };
             this.build(); return;
           }
         }
@@ -413,17 +440,23 @@
       });
       window.addEventListener('pointermove', (e) => {
         if (this.draw) { const m = this._toMan(e); this.draw.pts.push([m.x, m.y]); return; }
+        if (this.platStroke) { const m = this._toStage(e); this.platStroke.pts.push([m.x, m.y]); return; }
         if (!this.drag) return;
         const m = this._toStage(e); const d = this.drag;
         if (d.mode === 'spawn') { d.t.x = Math.round(m.x); d.t.y = Math.round(m.y); }
         else if (d.mode === 'move') { d.t.x = Math.round(m.x - d.dx); d.t.y = Math.round(m.y - d.dy); }
-        else if (d.mode === 'resize') { d.t.w = Math.max(40, Math.round(m.x - d.t.x)); d.t.h = Math.max(14, Math.round(m.y - d.t.y)); }
+        else if (d.mode === 'resize') {
+          const nw = Math.max(40, Math.round(m.x - d.t.x)), nh = Math.max(14, Math.round(m.y - d.t.y));
+          if (d.opts && d.ow > 0 && d.oh > 0) d.t.pts = d.opts.map(([x, y]) => [Math.round(x * nw / d.ow), Math.round(y * nh / d.oh)]); // a drawn squiggle scales with its box
+          d.t.w = nw; d.t.h = nh;
+        }
         else if (d.mode === 'portalMove') { d.t.x = Math.round(m.x - d.dx); d.t.y = Math.round(m.y - d.dy); }
         else if (d.mode === 'portalR') { d.t.r = Math.max(30, Math.round(m.y - d.t.y)); }
         this.queueSave();
       });
       window.addEventListener('pointerup', () => {
         if (this.draw) { this._finishStroke(); return; }
+        if (this.platStroke) { this._finishPlatStroke(this._stage()); return; }
         if (this.drag) { this.drag = null; this.build(); }
       });
     }
@@ -490,6 +523,10 @@
         ctx.strokeRect(st.bounds.x0, st.bounds.y0, st.bounds.x1 - st.bounds.x0, st.bounds.y1 - st.bounds.y0); ctx.setLineDash([]); ctx.restore();
       }
       this._renderStageHandles(ctx, st, sv);
+      // the platform currently being traced (accent), at the same chunk-width it'll become
+      if (this.platStroke && this.platStroke.pts.length) {
+        D.strokePts(ctx, this.platStroke.pts, { width: 16, color: D.COL.accent, rnd: DS.makeRng(3), jitter: 0.2, passes: 1 });
+      }
       ctx.restore();
       ctx.fillStyle = D.COL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.font = "26px 'Gloria Hallelujah', cursive";
