@@ -18,12 +18,16 @@ the visual contract that keeps the game looking like one coherent hand-drawn wor
 | [09-conventions-and-dev-workflow.md](09-conventions-and-dev-workflow.md) | Code style, running, testing, git, dev URL hooks. |
 | [10-modes-and-maps.md](10-modes-and-maps.md) | Game modes + map presets registries, the main menu, how to add either. |
 | [11-online-controllers.md](11-online-controllers.md) | Lobbies + phone controllers: the server, the QR/controller page, the WS relay, input routing. |
+| [13-ipad-drawing-capture-and-editor-seams.md](13-ipad-drawing-capture-and-editor-seams.md) | Drawing capture, projection, and existing editor/game seams. |
+| [14-visual-creation-phases.md](14-visual-creation-phases.md) | Four-phase creation architecture: drawing bridge, clarification agent, scene patching, asset enhancement. |
+| [15-creation-patch-contract.md](15-creation-patch-contract.md) | Proposed typed patch contract for approved scene edits. |
+| [16-agent-clarification-loop.md](16-agent-clarification-loop.md) | Accept/reject/ask loop and scene-plan contract. |
 
 ## 30-second orientation
 - Vanilla **HTML5 Canvas 2D + JS**, no build, no deps. Open `index.html` (or serve it).
 - Hand-drawn **charcoal-on-paper doodle** look, generated procedurally (no image assets).
 - Local 2-player platform fighter, Smash-style. Plus a **Draw** tool to make your own fighters.
-- Built so a **computer-vision module can later feed real-world platforms** into the same game.
+- Built so a **visual creation layer** and later CV/AR modules can feed game-valid scene data into the same runtime.
 - Single source of truth: `js/data.js` `Store` (localStorage). Editor writes it, game reads it.
 
 ## Golden rules (the short version)

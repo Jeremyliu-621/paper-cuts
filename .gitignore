@@ -1,3 +1,17 @@
 .DS_Store
 node_modules/
 *.log
+
+AGENTS.md
+**/AGENTS.md
+TODO.md
+
+# Milestone 1 local/runtime artifacts
+backend/.venv/
+backend/.pytest_cache/
+backend/**/__pycache__/
+.pytest_cache/
+.uv-cache/
+draw-client/node_modules/
+draw-client/dist/
+draw-client/.npm-cache/
