@@ -1,0 +1,15 @@
+# Render blueprint — one-click deploy of the Doodle Smash server (game + phone-controller
+# relay). Render supports WebSockets on web services, so the /ws relay + QR controller work.
+# Deploy: render.com → New → Blueprint → connect this repo → it reads this file.
+services:
+  - type: web
+    name: doodle-smash
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
