@@ -147,7 +147,7 @@
     ctx.restore();
   }
 
-  function renderWorld(ctx) {
+  function renderView(ctx) {
     if (!state.enabled || !state.visible || !state.projection) return;
     ctx.save();
     ctx.globalAlpha = 0.95;
@@ -170,5 +170,5 @@
     ctx.restore();
   }
 
-  DS.CreateOverlay = { init, renderWorld, renderHud, state };
+  DS.CreateOverlay = { init, renderView, renderHud, state };
 })(window);

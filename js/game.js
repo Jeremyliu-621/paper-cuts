@@ -694,7 +694,6 @@
       this.effects.render(ctx);
       for (const f of this.fighters) this._marker(ctx, f);
       if (this.devBars) for (const f of this.fighters) this._devSpeedBar(ctx, f);
-      if (DS.CreateOverlay) DS.CreateOverlay.renderWorld(ctx, this);
       ctx.restore();
       D.setLod(1); // HUD always full detail
 
@@ -702,6 +701,7 @@
       ctx.save();
       ctx.translate(this.ox, this.oy);
       ctx.scale(this.scale, this.scale);
+      if (DS.CreateOverlay) DS.CreateOverlay.renderView(ctx, this);
       this._hud(ctx);
       this._overlay(ctx);
       if (DS.CreateOverlay) DS.CreateOverlay.renderHud(ctx, this);
