@@ -685,19 +685,51 @@
           addHang(front, contour, p.x + p.w * 0.28, p.x + p.w * 0.72, density, seed + 2);
         } else {
           const l = Math.max(p.x, sp.l), r = Math.min(pr, sp.r), span = r - l;
-          // pillars anchored to points sampled ALONG the underside contour (near each end, + middle
-          // when wide), so a support's top always lands ON the platform — even at a steep/curved end
-          // — then drops vertically to the surface beneath that anchor. Anchors over open air (an
-          // overhang) find no surface and are skipped; the island edge below covers them instead.
-          const fracs = span < 150 ? [0.5] : [0.13, 0.87];
-          if (span > 560 && density >= 1) fracs.splice(1, 0, 0.5);
-          for (let i = 0; i < fracs.length; i++) {
-            const a = contourPt(contour, fracs[i]);
-            const sup = surfaceBelow(plats, a.x, a.y + 2, p);
-            if (sup && sup.y - a.y > GAP_MIN && sup.y - a.y < PILLAR_MAX) {
-              behind.push({ t: 'pillar', x: a.x, topY: a.y, botY: sup.y, tilt: a.tilt, botTilt: sup.tilt, thin: !!p.pass, seed: seed + 10 + i * 7 });
-              if (density >= 0.5 && i < 2) front.push({ t: 'plant', x: a.x, y: sup.y, tilt: sup.tilt, kind: pick(DS.makeRng(seed + 20 + i), TOP_KINDS), s: 0.78, seed: seed + 20 + i });
+          const pillars = []; // collect pillars so we can brace between them afterwards
+          // drop a pillar from an anchor point (ax,ay,tilt) to the surface beneath; returns it or null
+          const addPier = (ax, ay, tlt, idx, thin, plant) => {
+            const sup = surfaceBelow(plats, ax, ay + 2, p);
+            if (!sup || sup.y - ay <= GAP_MIN || sup.y - ay >= PILLAR_MAX) return null;
+            const d = { t: 'pillar', x: ax, topY: ay, botY: sup.y, tilt: tlt, botTilt: sup.tilt, thin, seed: seed + 10 + idx * 7 };
+            behind.push(d); pillars.push(d);
+            if (plant && density >= 0.5) front.push({ t: 'plant', x: ax, y: sup.y, tilt: sup.tilt, kind: pick(DS.makeRng(seed + 20 + idx), TOP_KINDS), s: 0.78, seed: seed + 20 + idx });
+            if (sup.y - ay > 240 && DS.makeRng(seed + 80 + idx)() < 0.38 * Math.min(1.2, density)) // ivy climbs some tall pillars
+              front.push({ t: 'ivy', x: ax, topY: ay, botY: sup.y, side: idx % 2 ? 1 : -1, seed: seed + 85 + idx });
+            return d;
+          };
+          // is the supported underside roughly horizontal? (so an x-based arcade reads right)
+          const uL = contourPt(contour, 0.12), uR = contourPt(contour, 0.88);
+          const flat = Math.abs(uR.y - uL.y) < span * 0.26;
+          const midGap = (() => { const s = surfaceBelow(plats, (l + r) / 2, (uL.y + uR.y) / 2 + 2, p); return s ? s.y - (uL.y + uR.y) / 2 : 0; })();
+          if (flat && span > 420 && midGap > 150 && density >= 0.6) {
+            // ARCADE: a row of slim piers joined by arches (aqueduct/viaduct) — for big, tall, flat spans
+            const bays = Math.max(2, Math.min(6, Math.round((span / 250) * density)));
+            const tops = [];
+            for (let k = 0; k <= bays; k++) {
+              const x = l + (span * k) / bays, u = undersideAt(contour, x), ay = u ? u.y : pb;
+              addPier(x, ay, u ? u.tilt : 0, k, true, false);
+              tops.push([x, ay]);
             }
+            for (let k = 0; k < bays; k++) {
+              const a = tops[k], b = tops[k + 1], sd = Math.min(64, (b[0] - a[0]) * 0.5);
+              behind.push({ t: 'arch', x0: a[0], y0: a[1], x1: b[0], y1: b[1], sd, seed: seed + 50 + k * 5 });
+            }
+          } else {
+            // pillars anchored to points sampled ALONG the underside contour (near each end, + middle
+            // when wide), so a support's top always lands ON the platform — even at a steep/curved end.
+            const fracs = span < 150 ? [0.5] : [0.13, 0.87];
+            if (span > 560 && density >= 1) fracs.splice(1, 0, 0.5);
+            for (let i = 0; i < fracs.length; i++) { const a = contourPt(contour, fracs[i]); addPier(a.x, a.y, a.tilt, i, !!p.pass, i < 2); }
+          }
+          // trestle bracing between neighbouring tall pillars; a buttress for a tall lone pier
+          if (density >= 0.7) {
+            for (let k = 0; k + 1 < pillars.length; k++) {
+              const A = pillars[k], B = pillars[k + 1];
+              if (Math.abs(A.x - B.x) < 380 && Math.min(A.botY - A.topY, B.botY - B.topY) > 130)
+                behind.push({ t: 'brace', ax: A.x, bx: B.x, topY: Math.max(A.topY, B.topY), botY: Math.min(A.botY, B.botY), seed: seed + 60 + k });
+            }
+            if (pillars.length === 1 && pillars[0].botY - pillars[0].topY > 300)
+              behind.push({ t: 'buttress', x: pillars[0].x, topY: pillars[0].topY, botY: pillars[0].botY, dir: pillars[0].x < (l + r) / 2 ? 1 : -1, seed: seed + 70 });
           }
           // overhangs → a jagged island edge (and foliage) on each jutting side, following the underside
           if (l - p.x > 50) { behind.push({ t: 'island', top: undersideStrip(contour, p.x, l + 8), depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, contour, p.x + 8, l - 8, density, seed + 32); }
@@ -713,7 +745,39 @@
           const x = p.x + 32 + (p.w - 64) * r2(), ta = topAt(topC, x);
           front.push({ t: 'plant', x, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, kind: pick(r2, isBase ? TOP_KINDS_BIG : TOP_KINDS), s: 0.76 + r2() * 0.5, seed: seed + 700 + i });
         }
+        // a low railing along a wide, roughly-flat top (some of them) — reads as a balcony/parapet
+        const eL = topAt(topC, p.x + 30), eR = topAt(topC, pr - 30);
+        if (p.w > 300 && density >= 0.6 && eL && eR && Math.abs(eL.y - eR.y) < p.w * 0.2 && DS.makeRng(seed + 900)() < 0.55) {
+          const steps = Math.max(3, Math.round(p.w / 70)), pts = [];
+          for (let i = 0; i <= steps; i++) { const x = p.x + 24 + (p.w - 48) * (i / steps), ta = topAt(topC, x); pts.push([x, ta ? ta.y : p.y]); }
+          front.push({ t: 'railing', pts, seed: seed + 910 });
+        }
       }
+    }
+    // ---- bridges between neighbouring platforms across a modest gap at a similar height ----
+    // each platform links to its NEAREST qualifying right-hand neighbour (so ~n bridges, not n²),
+    // skipping any pair with another platform sitting in the gap.
+    const edges = [];
+    for (const p of plats) {
+      if (p.move || p.kind === 'cannon' || p.kind === 'trampoline' || p.kind === 'spikes') continue;
+      const tc = topContour(p); let lx = Infinity, rx = -Infinity, ly = 0, ry = 0;
+      for (const pt of tc) { if (pt[0] < lx) { lx = pt[0]; ly = pt[1]; } if (pt[0] > rx) { rx = pt[0]; ry = pt[1]; } }
+      edges.push({ lx, ly, rx, ry, y: p.y });
+    }
+    for (let i = 0; i < edges.length; i++) {
+      const A = edges[i]; let best = null, bestGap = 1e9;
+      for (let j = 0; j < edges.length; j++) {
+        if (i === j) continue; const B = edges[j], gap = B.lx - A.rx;
+        if (gap <= 70 || gap > 430 || Math.abs(A.ry - B.ly) > 150) continue;
+        if (gap < bestGap) { bestGap = gap; best = B; }
+      }
+      if (!best) continue;
+      const by = (A.ry + best.ly) / 2;
+      let blocked = false;
+      for (const C of edges) { if (C === A || C === best) continue; if (C.rx > A.rx + 6 && C.lx < best.lx - 6 && Math.abs(C.y - by) < 200) { blocked = true; break; } }
+      if (blocked) continue;
+      const kind = bestGap < 150 ? 'stones' : (bestGap < 300 ? 'rope' : 'arch');
+      front.push({ t: 'bridge', x0: A.rx, y0: A.ry, x1: best.lx, y1: best.ly, kind, seed: DS.hashSeed('br' + Math.round(A.rx) + '_' + Math.round(best.lx)) });
     }
     return { behind, front };
   }
@@ -730,6 +794,13 @@
     const courses = Math.max(1, Math.round(h / 130));
     for (let i = 1; i <= courses; i++) { const y = topY + 6 + ((h - 6) * i) / (courses + 1); D.line(ctx, cx - wt * 0.8, y, cx + wt * 0.8, y, { width: 2, color: SCN, rnd, passes: 1 }); }
     ctx.globalAlpha = 1;
+    if (!it.thin && h > 230) { // chunky tall pier → a couple of little arched windows (a tower leg)
+      const wins = Math.min(3, Math.floor(h / 170));
+      for (let i = 0; i < wins; i++) {
+        const wy = topY + 46 + (h - 92) * (i / Math.max(1, wins - 1 || 1)) * (wins > 1 ? 1 : 0) + (wins === 1 ? (h - 92) * 0.4 : 0);
+        D.strokePts(ctx, [[cx - 6, wy + 9], [cx - 6, wy - 3], [cx, wy - 11], [cx + 6, wy - 3], [cx + 6, wy + 9]], { width: 2.4, color: SCN, rnd, passes: 1 });
+      }
+    }
     ctx.save(); ctx.translate(cx, botY); ctx.rotate(it.botTilt || 0); // footing flush to the surface it rests on
     D.strokePts(ctx, [[-wb - 7, 0], [wb + 7, 0], [wb + 2, -9], [-wb - 2, -9]],
       { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
@@ -792,8 +863,80 @@
     ctx.restore();
   }
 
-  function drawDressBehind(ctx, it) { if (it.t === 'pillar') drawPillar(ctx, it); else if (it.t === 'island') drawIsland(ctx, it); }
-  function drawDressFront(ctx, it) { if (it.t === 'hang') drawHang(ctx, it); else if (it.t === 'plant') drawTopPlant(ctx, it); }
+  // an arcade arch between two piers: springs from a point down each pier and crowns at the deck
+  function drawArch(ctx, it) {
+    const rnd = DS.makeRng(it.seed), midx = (it.x0 + it.x1) / 2, crown = Math.min(it.y0, it.y1) + 4;
+    D.curve(ctx, [[it.x0, it.y0 + it.sd], [midx, crown], [it.x1, it.y1 + it.sd]], { width: 4, color: SCN, rnd, passes: 1 });
+    ctx.globalAlpha = 0.4; D.curve(ctx, [[it.x0 + 4, it.y0 + it.sd], [midx, crown + 7], [it.x1 - 4, it.y1 + it.sd]], { width: 2.5, color: SCN, rnd, passes: 1 }); ctx.globalAlpha = 1;
+    ctx.fillStyle = SCN; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(midx, crown - 1, 2.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; // keystone dot
+  }
+  // a trestle X-brace between two neighbouring pillars, in their lower-middle band
+  function drawBrace(ctx, it) {
+    const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, y0 = it.topY + h * 0.46, y1 = it.topY + h * 0.74;
+    ctx.globalAlpha = 0.55;
+    D.line(ctx, it.ax, y0, it.bx, y1, { width: 2.5, color: SCN, rnd, passes: 1 });
+    D.line(ctx, it.ax, y1, it.bx, y0, { width: 2.5, color: SCN, rnd, passes: 1 });
+    ctx.globalAlpha = 1;
+  }
+  // a buttress: a wedge strut bracing a tall lone pier back to the ground
+  function drawButtress(ctx, it) {
+    const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, sy = it.topY + h * 0.34, ex = it.x + it.dir * Math.min(130, h * 0.5);
+    D.strokePts(ctx, [[it.x, sy], [ex, it.botY], [ex - it.dir * 18, it.botY], [it.x - it.dir * 9, sy + 12]],
+      { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+  }
+
+  function drawDressBehind(ctx, it) {
+    if (it.t === 'pillar') drawPillar(ctx, it);
+    else if (it.t === 'island') drawIsland(ctx, it);
+    else if (it.t === 'arch') drawArch(ctx, it);
+    else if (it.t === 'brace') drawBrace(ctx, it);
+    else if (it.t === 'buttress') drawButtress(ctx, it);
+  }
+  // ivy climbing up a pillar, with little leaves
+  function drawIvy(ctx, it) {
+    const rnd = DS.makeRng(it.seed), x = it.x, h = it.botY - it.topY, side = it.side || 1, n = Math.max(4, Math.round(h / 42));
+    const pts = [];
+    for (let i = 0; i <= n; i++) { const t = i / n; pts.push([x + Math.sin(t * 7 + side) * 7 * side, it.botY - t * h]); }
+    D.strokePts(ctx, pts, { width: 2.5, color: SCN, rnd, passes: 1 });
+    for (let i = 1; i < n; i++) {
+      if (i % 2) continue;
+      const t = i / n, lx = x + Math.sin(t * 7 + side) * 7 * side, ly = it.botY - t * h, d2 = (i % 4 === 0 ? 1 : -1) * side;
+      D.strokePts(ctx, [[lx, ly], [lx + d2 * 11, ly - 5], [lx + d2 * 7, ly + 5]], { width: 2.4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    }
+  }
+  // a low parapet railing following a flat top: a rail line on short posts
+  function drawRailing(ctx, it) {
+    const rnd = DS.makeRng(it.seed), pts = it.pts, H = 18;
+    D.strokePts(ctx, pts.map((p) => [p[0], p[1] - H]), { width: 3, color: SCN, rnd, passes: 1 }); // rail
+    for (let i = 0; i < pts.length; i++) D.line(ctx, pts[i][0], pts[i][1] - 1, pts[i][0], pts[i][1] - H, { width: 2, color: SCN, rnd, passes: 1 }); // posts
+  }
+  // a connector spanning a gap between two ledges: stepping-stones / rope bridge / stone arch
+  function drawBridge(ctx, it) {
+    const rnd = DS.makeRng(it.seed), x0 = it.x0, y0 = it.y0, x1 = it.x1, y1 = it.y1, dx = x1 - x0;
+    if (it.kind === 'stones') {
+      const n = Math.max(2, Math.round(dx / 46));
+      for (let i = 1; i < n; i++) { const t = i / n, x = x0 + dx * t, y = y0 + (y1 - y0) * t + Math.sin(t * Math.PI) * 12; D.circle(ctx, x, y + 6, 7, { width: 3, color: SCN, rnd, fill: D.COL.paper }); }
+    } else if (it.kind === 'rope') {
+      const sag = Math.min(40, dx * 0.16);
+      const rope = (off) => { const p = []; for (let i = 0; i <= 8; i++) { const t = i / 8; p.push([x0 + dx * t, y0 + (y1 - y0) * t + Math.sin(t * Math.PI) * sag + off]); } return p; };
+      const top = rope(0), bot = rope(13);
+      D.strokePts(ctx, top, { width: 2.5, color: SCN, rnd, passes: 1 });
+      D.strokePts(ctx, bot, { width: 3, color: SCN, rnd, passes: 1 });
+      for (let i = 1; i < 8; i++) D.line(ctx, top[i][0], top[i][1], bot[i][0], bot[i][1], { width: 2, color: SCN, rnd, passes: 1 }); // planks
+    } else { // arch: a flat deck with a stone arch springing below it
+      D.line(ctx, x0, y0, x1, y1, { width: 3.5, color: SCN, rnd, passes: 1 });
+      const midx = (x0 + x1) / 2, midy = (y0 + y1) / 2;
+      D.curve(ctx, [[x0 + dx * 0.12, y0 + (y1 - y0) * 0.12], [midx, midy + Math.min(70, dx * 0.34)], [x1 - dx * 0.12, y1 - (y1 - y0) * 0.12]], { width: 3, color: SCN, rnd, passes: 1 });
+    }
+  }
+
+  function drawDressFront(ctx, it) {
+    if (it.t === 'hang') drawHang(ctx, it);
+    else if (it.t === 'plant') drawTopPlant(ctx, it);
+    else if (it.t === 'ivy') drawIvy(ctx, it);
+    else if (it.t === 'railing') drawRailing(ctx, it);
+    else if (it.t === 'bridge') drawBridge(ctx, it);
+  }
 
   // compute (and cache) the derived dressing for a stage. Key = density + every platform's box, so
   // it regenerates only when the layout (or the slider) actually changes. Moving platforms are
