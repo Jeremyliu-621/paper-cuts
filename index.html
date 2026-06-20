@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Doodle Smash</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Gloria+Hallelujah&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script>
+  // on-page error banner (handy while developing without devtools open)
+  window.__errs = [];
+  function __showErr(msg){
+    window.__errs.push(msg);
+    var d = document.getElementById('err');
+    if(!d){ d = document.createElement('div'); d.id='err'; document.body.appendChild(d); }
+    d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;background:#b3402a;color:#fff;'
+      +'font:14px/1.4 monospace;padding:8px 12px;white-space:pre-wrap;max-height:40%;overflow:auto';
+    d.textContent='JS error(s):\n'+window.__errs.join('\n');
+  }
+  window.addEventListener('error', function(e){
+    __showErr((e.message||'error')+'  @ '+(e.filename||'').split('/').pop()+':'+e.lineno);
+  });
+  window.addEventListener('unhandledrejection', function(e){ __showErr('promise: '+(e.reason&&e.reason.message||e.reason)); });
+</script>
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand">Doodle&nbsp;Smash</div>
+      <nav class="tabs">
+        <button class="tab active" data-tab="play">Play</button>
+        <button class="tab" data-tab="editor">Editor</button>
+      </nav>
+      <div id="topbar-right">
+        <button id="btn-mute" title="Mute / unmute (M)"></button>
+        <button id="btn-menu" title="Main menu">≡ Menu</button>
+        <button id="btn-help" title="Controls">?</button>
+      </div>
+    </header>
+
+    <main id="stage-wrap">
+      <canvas id="game"></canvas>
+
+      <!-- Editor side panel (hidden in Play mode) -->
+      <aside id="editor-panel" hidden></aside>
+
+      <!-- Setup page: pick a game mode + map (icon tiles, minimal text) -->
+      <div id="menu-overlay" class="screen" hidden>
+        <div class="page-card">
+          <div class="menu-title">Doodle&nbsp;Smash</div>
+          <h3>Mode</h3>
+          <div id="menu-modes" class="icon-grid"></div>
+          <h3>Map</h3>
+          <div id="menu-maps" class="icon-grid"></div>
+          <div class="menu-footer"><button id="menu-start">Next ▶</button></div>
+        </div>
+      </div>
+
+      <!-- Lobby page: QR + joined players (top); per-player columns w/ ult pick + ready (bottom) -->
+      <div id="lobby-overlay" class="screen" hidden>
+        <div class="page-card lobby-page">
+          <div class="lobby-top">
+            <div id="lobby-qr" class="lobby-qr-box"></div>
+            <div id="lobby-players" class="lobby-players"></div>
+          </div>
+          <div id="lobby-cols" class="lobby-cols"></div>
+          <div class="menu-footer">
+            <button id="lobby-back">◀ Back</button>
+            <span id="lobby-hint" class="lobby-hint"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Countdown: its own dramatic full-screen page (canvas-drawn 3·2·1·FIGHT!) -->
+      <div id="countdown-overlay" class="screen" hidden>
+        <canvas id="countdown-canvas" class="countdown-canvas"></canvas>
+      </div>
+
+      <!-- Draw-your-character pad (host mouse; phone feeds the same skin in phase 2b) -->
+      <div id="draw-overlay" class="screen" hidden>
+        <div class="page-card draw-page">
+          <div class="menu-title" id="draw-title">Draw your fighter</div>
+          <div class="menu-sub">trace over the ghost — each stroke snaps to the body part it lands on</div>
+          <canvas id="draw-canvas" class="draw-canvas"></canvas>
+          <div class="menu-footer">
+            <button id="draw-undo">Undo</button>
+            <button id="draw-clear">Clear</button>
+            <button id="draw-done">Done ✓</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls help overlay -->
+      <div id="help-overlay" hidden>
+        <div class="help-card">
+          <h2>Controls</h2>
+          <div class="help-cols">
+            <div>
+              <h3>Player 1</h3>
+              <ul>
+                <li><b>A / D</b> — move</li>
+                <li><b>W</b> — jump (×3)</li>
+                <li><b>S</b> — crouch / drop-through</li>
+                <li><b>F</b> — attack</li>
+                <li><b>G</b> — special</li>
+                <li><b>Left&nbsp;Shift</b> — shield</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Player 2</h3>
+              <ul>
+                <li><b>◀ / ▶</b> — move</li>
+                <li><b>▲</b> — jump (×3)</li>
+                <li><b>▼</b> — crouch / drop-through</li>
+                <li><b>.</b> — attack</li>
+                <li><b>/</b> — special</li>
+                <li><b>Right&nbsp;Shift</b> — shield</li>
+              </ul>
+            </div>
+          </div>
+          <p class="help-misc"><b>Attacks change with your state:</b> in the air → <b>hammer slam</b> (spikes down, held till you land); with <b>momentum</b> (right after a dash, kept by jumping) → <b>super punch</b> 🥊. <b>Special</b> with momentum → <b>ultra punch</b> up close or a <b>super shot</b> 🚀 at range.</p>
+          <p class="help-misc"><b>Momentum:</b> a <b>dash</b> charges it (and a jump keeps it briefly) — that's what powers the special moves above. Just running isn't enough.</p>
+          <p class="help-misc">Hold <b>up</b>/<b>down</b> as you fire <b>Special</b> to aim it diagonally (straight by default).</p>
+          <p class="help-misc">Falling past the stage edge grabs the <b>ledge</b> — then <b>jump</b> to hop up, hold <b>toward the stage</b> to climb, or <b>down</b> to drop.</p>
+          <p class="help-misc"><b>Enter</b> start / rematch &nbsp;·&nbsp; <b>P</b> pause &nbsp;·&nbsp; <b>Esc</b> close</p>
+          <button id="help-close">got it</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- classic scripts (load order matters) so the game runs from file:// with no build.
+       served over http(s)? append a per-load cache-bust so edits to rarely-changed files
+       never get served stale by the browser's heuristic cache. (file:// loads plain.) -->
+  <script>
+    (function () {
+      var files = ['rng', 'draw', 'data', 'character', 'skin', 'effects', 'audio', 'input', 'physics',
+        'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'main'];
+      var http = location.protocol === 'http:' || location.protocol === 'https:';
+      var bust = http ? '?v=' + Date.now() : '';
+      for (var i = 0; i < files.length; i++) {
+        document.write('<scr' + 'ipt src="js/' + files[i] + '.js' + bust + '"></scr' + 'ipt>');
+      }
+    })();
+  </script>
+</body>
+</html>

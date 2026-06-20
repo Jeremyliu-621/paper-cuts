@@ -1,0 +1,186 @@
+:root{
+  --ink:#2f2a26;
+  --ink-soft:#6b6259;
+  --paper:#f6f1e7;
+  --paper-2:#efe7d8;
+  --accent:#d4663f;
+  --line:3px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;}
+body{
+  font-family:'Patrick Hand', 'Comic Sans MS', cursive, sans-serif;
+  background:var(--paper-2);
+  color:var(--ink);
+  overflow:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+#app{display:flex;flex-direction:column;height:100vh;}
+
+/* top bar */
+#topbar{
+  display:flex;align-items:center;gap:18px;
+  padding:6px 16px;
+  background:var(--paper);
+  border-bottom:var(--line) solid var(--ink);
+  z-index:5;
+}
+.brand{font-family:'Gloria Hallelujah',cursive;font-size:22px;letter-spacing:.5px;}
+.tabs{display:flex;gap:8px;}
+.tab{
+  font-family:inherit;font-size:20px;cursor:pointer;
+  background:var(--paper);color:var(--ink);
+  border:var(--line) solid var(--ink);border-radius:14px 12px 16px 12px;
+  padding:2px 16px 4px;transition:transform .06s ease;
+}
+.tab:hover{transform:translateY(-1px) rotate(-.6deg);}
+.tab.active{background:var(--ink);color:var(--paper);}
+#topbar-right{margin-left:auto;}
+#topbar-right{display:flex;align-items:center;gap:8px;}
+#btn-menu{
+  font-family:inherit;font-size:18px;cursor:pointer;
+  border:var(--line) solid var(--ink);border-radius:12px 10px 14px 10px;
+  background:var(--paper);color:var(--ink);padding:2px 12px 4px;
+}
+#btn-menu:hover{transform:translateY(-1px) rotate(-.6deg);}
+#btn-help{
+  font-family:inherit;font-size:20px;width:34px;height:34px;cursor:pointer;
+  border:var(--line) solid var(--ink);border-radius:50% 48% 52% 50%;
+  background:var(--paper);color:var(--ink);line-height:1;
+}
+#btn-mute{
+  width:36px;height:34px;cursor:pointer;padding:0;
+  display:flex;align-items:center;justify-content:center;
+  border:var(--line) solid var(--ink);border-radius:11px 13px 10px 12px;
+  background:var(--paper);color:var(--ink);line-height:1;
+}
+#btn-mute canvas{display:block;}
+#btn-mute.off{opacity:.5;}
+#btn-mute:hover{transform:translateY(-1px) rotate(-.6deg);}
+
+/* stage */
+#stage-wrap{position:relative;flex:1;display:flex;min-height:0;background:var(--paper-2);}
+#game{flex:1;min-width:0;display:block;background:var(--paper);}
+
+/* editor panel */
+#editor-panel{
+  width:340px;flex:0 0 340px;height:100%;overflow-y:auto;
+  background:var(--paper);
+  border-left:var(--line) solid var(--ink);
+  padding:12px 14px 60px;
+}
+#editor-panel h2{font-family:'Gloria Hallelujah',cursive;font-size:18px;margin:6px 0 10px;}
+#editor-panel h3{font-size:18px;margin:16px 0 6px;border-bottom:2px dashed var(--ink-soft);padding-bottom:2px;}
+.ed-row{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:17px;}
+.ed-row label{flex:0 0 118px;color:var(--ink-soft);}
+.ed-row input[type=range]{flex:1;accent-color:var(--accent);}
+.ed-row .val{flex:0 0 46px;text-align:right;}
+.ed-row select,.ed-row input[type=number],.ed-row input[type=text]{
+  font-family:inherit;font-size:16px;flex:1;
+  border:2px solid var(--ink);border-radius:8px;padding:1px 6px;background:var(--paper);
+}
+.ed-seg{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0;}
+.ed-seg button{
+  font-family:inherit;font-size:16px;cursor:pointer;
+  border:2px solid var(--ink);border-radius:10px 8px 12px 8px;
+  background:var(--paper);color:var(--ink);padding:1px 10px 3px;
+}
+.ed-seg button.on{background:var(--ink);color:var(--paper);}
+.ed-btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;}
+.ed-btns button{
+  font-family:inherit;font-size:17px;cursor:pointer;
+  border:var(--line) solid var(--ink);border-radius:12px 10px 14px 10px;
+  background:var(--paper);color:var(--ink);padding:3px 12px 5px;
+}
+.ed-btns button:hover{transform:rotate(-.7deg);}
+.ed-note{font-size:15px;color:var(--ink-soft);margin:6px 0;line-height:1.25;}
+.ed-preview{border:2px dashed var(--ink-soft);border-radius:10px;margin:8px 0;display:block;background:var(--paper);width:100%;}
+
+/* help overlay */
+#help-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:rgba(47,42,38,.35);z-index:20;}
+.help-card{background:var(--paper);border:var(--line) solid var(--ink);border-radius:18px 14px 20px 16px;
+  padding:18px 26px 22px;min-width:360px;box-shadow:6px 8px 0 rgba(47,42,38,.25);}
+.help-card h2{font-family:'Gloria Hallelujah',cursive;margin:0 0 12px;}
+.help-cols{display:flex;gap:40px;}
+.help-card h3{margin:0 0 6px;}
+.help-card ul{margin:0;padding-left:18px;font-size:18px;line-height:1.5;}
+.help-misc{margin:14px 0 12px;font-size:17px;color:var(--ink-soft);}
+#help-close{font-family:inherit;font-size:18px;cursor:pointer;border:var(--line) solid var(--ink);
+  border-radius:12px;background:var(--ink);color:var(--paper);padding:3px 18px 5px;}
+/* main menu */
+/* full-screen OPAQUE pages (its own page, no game peeking through) */
+#menu-overlay,#lobby-overlay,#draw-overlay,#countdown-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  background:var(--paper);z-index:25;padding:18px;overflow:auto;}
+#draw-overlay{z-index:28;}
+#countdown-overlay{z-index:32;padding:0;overflow:hidden;}
+.countdown-canvas{width:100%;height:100%;display:block;}
+.menu-sub{text-align:center;color:var(--ink-soft);font-size:16px;margin:2px 0 8px;}
+.draw-page{display:flex;flex-direction:column;align-items:center;}
+.draw-canvas{width:min(420px,86vw);height:min(440px,62vh);border:var(--line) solid var(--ink);
+  border-radius:16px;background:var(--paper-2,#e9e0cf);touch-action:none;cursor:crosshair;}
+.lobby-draw{font-family:inherit;font-size:14px;cursor:pointer;border:2px dashed var(--ink-soft);
+  border-radius:10px;background:var(--paper);color:var(--ink-soft);padding:3px 12px;}
+.lobby-draw:hover{border-style:solid;color:var(--ink);}
+.page-card{width:min(960px,97vw);max-height:97vh;overflow:auto;text-align:center;}
+.menu-title{font-family:'Gloria Hallelujah',cursive;font-size:42px;text-align:center;margin:2px 0 4px;}
+.page-card h3{font-family:'Patrick Hand',cursive;font-size:18px;letter-spacing:3px;text-transform:uppercase;
+  color:var(--ink-soft);margin:16px 0 9px;}
+
+/* icon tiles for modes + maps (minimal text) */
+.icon-grid{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;}
+.icon-card{font-family:inherit;cursor:pointer;border:var(--line) solid var(--ink);border-radius:16px 12px 17px 13px;
+  background:var(--paper);color:var(--ink);padding:8px 8px 6px;width:112px;display:flex;flex-direction:column;
+  align-items:center;gap:3px;transition:transform .07s ease;}
+.icon-card:hover{transform:translateY(-2px) rotate(-.6deg);}
+.icon-card.sel{background:var(--ink);}
+.icon-card.sel .ic-name{color:var(--paper);}
+.icon-card canvas{width:88px;height:60px;}
+.ic-name{font-family:'Gloria Hallelujah',cursive;font-size:15px;}
+
+/* lobby page */
+.lobby-page{display:flex;flex-direction:column;gap:12px;}
+.lobby-top{display:flex;gap:18px;align-items:flex-start;justify-content:center;}
+.lobby-cols{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+.lobby-col{border:var(--line) solid var(--ink);border-radius:16px 12px 17px 13px;background:var(--paper);
+  padding:10px 10px 12px;display:flex;flex-direction:column;align-items:center;gap:8px;width:176px;}
+.lobby-col.ready{box-shadow:0 0 0 4px #2f6fe0;}
+.lobby-col-name{font-family:'Gloria Hallelujah',cursive;font-size:18px;}
+.lobby-char{width:120px;height:108px;}
+.lobby-ults{display:flex;gap:6px;}
+.lobby-ult{cursor:pointer;border:3px solid var(--ink-soft);border-radius:12px;background:var(--paper);padding:2px;line-height:0;}
+.lobby-ult.sel{border-color:#2f6fe0;}
+.lobby-ult canvas{width:42px;height:42px;display:block;}
+.lobby-ready{font-family:inherit;font-size:16px;cursor:pointer;border:var(--line) solid var(--ink);
+  border-radius:12px 9px 13px 10px;background:var(--paper);color:var(--ink);padding:5px 16px;}
+.lobby-ready.on{background:#2f6fe0;color:var(--paper);}
+/* read-only mirrors of a phone's own choices (host can't click these) */
+.lobby-ult.ro{cursor:default;opacity:.85;}
+.lobby-ready.ro{cursor:default;border-style:dashed;}
+.lobby-ready.ro.on{border-style:solid;}
+.lobby-onphone{font-size:13px;color:var(--ink-soft);font-style:italic;}
+.lobby-hint{flex:1;text-align:right;color:var(--ink-soft);font-size:16px;}
+
+/* QR + joined-player chips (lobby top) */
+.lobby-qr-box{flex:0 0 auto;display:flex;flex-direction:column;align-items:center;
+  border:var(--line) solid var(--ink);border-radius:14px;padding:8px 10px;background:var(--paper);}
+.lobby-qr-box img{width:130px;height:130px;display:block;image-rendering:pixelated;}
+.lobby-cap{font-size:14px;color:var(--ink-soft);margin-top:4px;}
+.lobby-code{font-family:'Gloria Hallelujah',cursive;font-size:22px;letter-spacing:2px;line-height:1;}
+.lobby-players{flex:1;max-width:440px;display:grid;grid-template-columns:repeat(2,1fr);gap:6px;align-content:start;}
+.lobby-slot{display:flex;align-items:center;gap:8px;border:2px dashed var(--ink-soft);border-radius:10px;
+  padding:5px 9px;font-size:15px;color:var(--ink-soft);min-height:34px;}
+.lobby-slot.on{border-style:solid;border-color:var(--ink);color:var(--ink);background:var(--paper);}
+.slot-tag{font-family:'Gloria Hallelujah',cursive;font-size:15px;flex:0 0 auto;}
+.slot-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.lobby-note{font-size:14px;color:var(--ink-soft);line-height:1.3;}
+
+.menu-footer{display:flex;align-items:center;gap:14px;margin-top:16px;justify-content:center;}
+.menu-footer button{font-family:inherit;font-size:21px;cursor:pointer;
+  border:var(--line) solid var(--ink);border-radius:14px 11px 16px 12px;
+  background:var(--accent);color:var(--paper);padding:6px 22px 8px;}
+.menu-footer button:hover{transform:translateY(-1px) rotate(-.6deg);}
+#lobby-back{background:var(--paper) !important;color:var(--ink) !important;}
+
+.hidden{display:none !important;}
+[hidden]{display:none !important;}
