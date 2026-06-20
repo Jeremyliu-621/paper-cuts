@@ -164,6 +164,8 @@
         stocks: 3,
         knockbackScale: 1.0,
         hitstop: 1.0,
+        scenery: 1.0, // procedural "dressing" density (pillars/plants under+on platforms); 0 = off
+
         // generous KO bounds so fighters fly way out before dying (the dynamic camera
         // zooms out to follow them); ~1100px of margin around the 1920x1080 stage.
         blast: { left: -1100, right: VIEW.w + 1100, top: -900, bottom: VIEW.h + 950 },

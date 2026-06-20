@@ -513,6 +513,128 @@
 
   const BG = { mountain, hill, tower, building, arch, skyisland };
 
+  // ---- procedural "dressing" (Townscaper-style) ----------------------------
+  // Cosmetic props DERIVED from the platform layout: support pillars/stilts grow under elevated
+  // platforms down to whatever's beneath (a platform top, or the ground), hanging vines dangle
+  // under irregular drawn squiggles, and small plants sprinkle the tops + pillar feet. It's
+  // deterministic (each prop seeds off the platform's box) so it's stable AND regrows the instant
+  // a platform is drawn/moved/resized. Never saved — recomputed lazily in drawStage and cached by a
+  // geometry+density key. Purely visual: no collision, zero gameplay impact. Density 0..2.
+  const DRESS_PLANTS = ['grass', 'flower', 'mushroom', 'reeds']; // small, sit nicely on a ledge top
+
+  // the highest platform top strictly below `belowY` that spans `x` — the surface a pillar rests on
+  function surfaceBelow(plats, x, belowY, ignore) {
+    let best = Infinity;
+    for (const q of plats) {
+      if (q === ignore || q.move) continue;          // can't rest a support on a swinging platform
+      if (x < q.x + 6 || x > q.x + q.w - 6) continue; // x must be over q
+      if (q.y >= belowY && q.y < best) best = q.y;
+    }
+    return best;
+  }
+
+  function deriveDressing(st, density) {
+    const behind = [], front = [], plats = st.platforms || [];
+    let floorY = -Infinity; // top of the chunky base ground — a fallback footing for high ledges
+    for (const q of plats) if (!q.pass && !q.move && q.h >= 110) floorY = Math.max(floorY, q.y);
+    const GAP_MIN = 46, PILLAR_MAX = 760;
+    for (const p of plats) {
+      if (p.move) continue; // moving/swinging platforms ride free — no ground-anchored dressing
+      const gimmick = p.kind === 'cannon' || p.kind === 'trampoline' || p.kind === 'spikes' || p.kind === 'box';
+      const seed = DS.hashSeed('dress' + p.x + '_' + p.y + '_' + p.w + '_' + p.h);
+      const botY = p.y + p.h;
+      // support beneath this platform (a platform below, else the base ground line)
+      let sup = surfaceBelow(plats, p.x + p.w / 2, botY + 2, p);
+      if (sup === Infinity && floorY > botY) sup = floorY;
+      const gap = sup - botY, elevated = gap > GAP_MIN && gap < PILLAR_MAX;
+      // --- pillars: hold up an elevated platform (skip drawn squiggles — irregular underside) ---
+      if (!gimmick && p.kind !== 'drawn' && elevated) {
+        const cols = Math.max(1, Math.min(3, Math.round((p.w / 360) * density)));
+        const thin = !!p.pass; // thin wooden stilts for floats, chunky stone piers for solids
+        for (let i = 0; i < cols; i++) {
+          const t = cols === 1 ? 0.5 : 0.18 + 0.64 * (i / (cols - 1));
+          const x = p.x + p.w * t;
+          let s2 = surfaceBelow(plats, x, botY + 2, p);
+          if (s2 === Infinity && floorY > botY) s2 = floorY;
+          if (s2 - botY > GAP_MIN && s2 - botY < PILLAR_MAX) {
+            behind.push({ t: 'pillar', x, topY: botY, botY: s2, thin, seed: seed + i * 17 });
+            if (density >= 0.5) front.push({ t: 'plant', kind: 'grass', x, y: s2, s: 0.9, seed: seed + 90 + i });
+          }
+        }
+      }
+      // --- hanging vines under a floating squiggle (a straight pillar would miss its curvy base) ---
+      if (!gimmick && p.kind === 'drawn' && (sup === Infinity || gap > 60)) {
+        const n = Math.max(1, Math.min(3, Math.round((p.w / 240) * density)));
+        for (let i = 0; i < n; i++) {
+          const x = p.x + p.w * (n === 1 ? 0.5 : 0.2 + 0.6 * (i / (n - 1)));
+          front.push({ t: 'vine', x, y: botY - 30, seed: seed + 300 + i * 13 });
+        }
+      }
+      // --- a few plants ON TOP of any real platform (denser tops on the big ground slabs) ---
+      if (!gimmick && p.w >= 120) {
+        const n = Math.max(0, Math.round((p.w / 320) * density));
+        for (let i = 0; i < n; i++) {
+          const r = DS.makeRng(seed + 700 + i * 29);
+          const x = p.x + 34 + (p.w - 68) * r();
+          const big = p.h >= 110 && r() < 0.5;
+          const kind = big ? (r() < 0.5 ? 'bush' : 'tree') : DRESS_PLANTS[(r() * DRESS_PLANTS.length) | 0];
+          front.push({ t: 'plant', kind, x, y: p.y + 2, s: big ? 0.7 + r() * 0.3 : 0.8 + r() * 0.45, seed: seed + 700 + i });
+        }
+      }
+    }
+    return { behind, front };
+  }
+
+  // a support pillar/stilt: a tapered paper column with a capital + base footing, a couple of stone
+  // courses, and a faint gray echo offset behind it so a "stand" reads as receding into the scenery.
+  function drawPillar(ctx, it) {
+    const rnd = DS.makeRng(it.seed), ck = D.COL.ink;
+    const cx = it.x, topY = it.topY, botY = it.botY, h = botY - topY;
+    const wt = it.thin ? 9 : 16, wb = it.thin ? 12 : 21; // half-widths: slim stilt vs chunky pier
+    // faint "stand" echo behind-and-right — a background structure peeking out for depth
+    ctx.save(); ctx.globalAlpha = 0.5;
+    D.strokePts(ctx, [[cx - wt + 12, topY], [cx - wb + 12, botY], [cx + wb + 12, botY], [cx + wt + 12, topY]],
+      { width: 4, color: BG_INK, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    ctx.restore();
+    // capital (a little lintel where the shaft meets the platform underside)
+    D.strokePts(ctx, [[cx - wt - 7, topY], [cx + wt + 7, topY], [cx + wt + 3, topY + 11], [cx - wt - 3, topY + 11]],
+      { width: 4.5, color: ck, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    // shaft (slightly tapered, paper-filled so it occludes the field behind)
+    D.strokePts(ctx, [[cx - wt, topY + 9], [cx - wb, botY], [cx + wb, botY], [cx + wt, topY + 9]],
+      { width: 5, color: ck, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    // centre seam + faint stone courses
+    ctx.globalAlpha = 0.4;
+    D.line(ctx, cx, topY + 15, cx, botY - 8, { width: 2, color: ck, passes: 1 });
+    const courses = Math.max(1, Math.round(h / 120));
+    for (let i = 1; i <= courses; i++) { const y = topY + (h * i) / (courses + 1); D.line(ctx, cx - wt * 0.8, y, cx + wt * 0.8, y, { width: 2, color: ck, rnd, passes: 1 }); }
+    ctx.globalAlpha = 1;
+    // base footing flare
+    D.strokePts(ctx, [[cx - wb - 8, botY], [cx + wb + 8, botY], [cx + wb + 2, botY - 10], [cx - wb - 2, botY - 10]],
+      { width: 4.5, color: ck, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+  }
+
+  function drawDressFront(ctx, it) {
+    if (it.t === 'vine') { vine(ctx, it.x, it.y, it.x + it.seed, it.y); return; }
+    if (it.t === 'plant') {
+      const fn = DECOR[it.kind]; if (!fn) return;
+      ctx.save(); ctx.translate(it.x, it.y); ctx.scale(it.s || 1, it.s || 1); fn(ctx, 0, 0, it.x, it.seed); ctx.restore();
+    }
+  }
+
+  // compute (and cache) the derived dressing for a stage. Key = density + every platform's box, so
+  // it regenerates only when the layout (or the slider) actually changes. Moving platforms are
+  // tokenised out of the key (their live position changes each frame but they're never dressed).
+  function dressOf(st) {
+    const sc = DS.Store && DS.Store.data && DS.Store.data.settings && DS.Store.data.settings.scenery;
+    const density = sc == null ? 1 : sc;
+    if (density <= 0) { st._dress = EMPTY_DRESS; st._dressKey = 'off'; return EMPTY_DRESS; }
+    let key = density.toFixed(2) + '|';
+    for (const p of st.platforms) key += p.move ? 'M;' : (p.x + ',' + p.y + ',' + p.w + ',' + p.h + ',' + (p.pass ? 1 : 0) + (p.kind || '') + ';');
+    if (st._dressKey !== key) { st._dress = deriveDressing(st, density); st._dressKey = key; }
+    return st._dress;
+  }
+  const EMPTY_DRESS = { behind: [], front: [] };
+
   // ---- composition ---------------------------------------------------------
   // accepts a stage object ({platforms,...}) or the data wrapper ({stage:...}).
   function stageOf(data) { return data.platforms ? data : data.stage; }
@@ -547,10 +669,13 @@
   function drawStage(ctx, data, cam, home) {
     const st = stageOf(data);
     const cx = cam && cam.cx, cy = cam && cam.cy, hx = home && home.x, hy = home && home.y;
+    const dress = dressOf(st); // procedural pillars/plants derived from the layout (cached)
     // clouds live in the sky → a gentle far-layer parallax so they drift slower than the field
     for (const d of st.decor || []) if (d.type === 'cloud') cloud(ctx, px(d.x, cx, hx, 0.35), px(d.y, cy, hy, 0.35), d.s);
+    for (const it of dress.behind) drawPillar(ctx, it);   // supports sit BEHIND their platform
     for (const p of st.platforms) if (p.move && p.move.type === 'swing') ropes(ctx, p);
     for (const p of st.platforms) platform(ctx, p);
+    for (const it of dress.front) drawDressFront(ctx, it); // vines under / plants on top, in FRONT
     for (const pt of st.portals || []) portalGlyph(ctx, pt);
     for (const d of st.decor || []) {
       if (d.type === 'cloud') continue;

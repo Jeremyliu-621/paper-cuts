@@ -372,6 +372,9 @@
       this._slider(p, 'knockback', 0.4, 2.2, 0.05, () => s.knockbackScale, (v) => s.knockbackScale = v);
       this._slider(p, 'hitstop', 0, 2, 0.1, () => s.hitstop, (v) => s.hitstop = v);
       p.appendChild(el('div', 'ed-note', 'Tip: lower gravity + higher knockback = floatier, more dramatic launches.'));
+      p.appendChild(el('h3', '', 'Scenery'));
+      this._slider(p, 'dressing', 0, 2, 0.1, () => (s.scenery == null ? 1 : s.scenery), (v) => s.scenery = v);
+      p.appendChild(el('div', 'ed-note', 'Auto-grows pillars under platforms + plants on top from the layout (cosmetic). 0 = off. Updates live as you draw/move platforms.'));
     }
 
     _export() {
