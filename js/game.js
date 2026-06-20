@@ -885,11 +885,11 @@
       const ink = D.COL.ink;
       // Oski the Bear: ears + big eyes + a muzzle (mini version of character.js bearFace)
       if (ch.head === 'bear') {
-        for (const s of [-1, 1]) { const ex = s * 9.5; D.circle(ctx, ex, -14, 6, { width: 3.5, color: ink, rnd, fill: D.COL.paper }); ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(ex, -13.5, 2.5, 0, 7); ctx.fill(); }
+        for (const s of [-1, 1]) { const ex = s * 10; D.circle(ctx, ex, -13, 6.5, { width: 3, color: ink, rnd, fill: D.COL.paper }); D.circle(ctx, ex, -12.5, 3, { width: 0, color: D.COL.paperShade, fill: D.COL.paperShade }); }
         D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd });
-        ctx.fillStyle = ink; for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * 5, -1.5, 2.3, 0, 7); ctx.fill(); } // dot eyes
-        D.ellipse(ctx, 0, 6, 8, 5.2, { width: 3, color: ink, rnd, fill: D.COL.paperShade });
-        ctx.fillStyle = ink; ctx.beginPath(); ctx.ellipse(0, 3.8, 2.2, 1.6, 0, 0, 7); ctx.fill(); // nose
+        for (const s of [-1, 1]) { D.circle(ctx, s * 5.5, -3, 3.6, { width: 2.5, color: ink, rnd, fill: D.COL.paper }); ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(s * 5.5 + s * 0.6, -2.4, 1.8, 0, 7); ctx.fill(); } // big eyes + pupils
+        D.ellipse(ctx, 0, 7, 7.5, 5, { width: 3, color: ink, rnd, fill: D.COL.paperShade });
+        ctx.fillStyle = ink; ctx.beginPath(); ctx.ellipse(0, 4.9, 2.2, 1.6, 0, 0, 7); ctx.fill(); // nose
         return;
       }
       D.circle(ctx, 0, 0, 17, { width: 4.5, color: ink, rnd });
