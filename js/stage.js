@@ -252,14 +252,14 @@
       ctx.beginPath(); ctx.moveTo(x, p.y + p.h - 5); ctx.lineTo(x + 15, p.y + 7); ctx.stroke();
     }
     ctx.restore();
-    // a row of sharp triangular spikes poking up along the top edge (paper-filled so they occlude)
-    const n = Math.max(3, Math.round(p.w / 34)), base = p.y + 3;
-    const half = (p.w - 16) / Math.max(1, n - 1) / 2 + 2;
+    // a row of sharp triangular teeth tiled EDGE-TO-EDGE across the full width, so the spikes
+    // start and end flush with the slab's sides (no overhang past the box, no gap at the corners)
+    const n = Math.max(2, Math.round(p.w / 30)), tw = p.w / n, base = p.y + 3;
     for (let i = 0; i < n; i++) {
-      const x = p.x + 8 + (p.w - 16) * (i / Math.max(1, n - 1)), up = 22 + rnd() * 8;
-      D.strokePts(ctx, [[x - half, base], [x, base - up], [x + half, base]], { width: 3.5, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
+      const x0 = p.x + i * tw, xc = x0 + tw / 2, up = 22 + rnd() * 8;
+      D.strokePts(ctx, [[x0, base], [xc, base - up], [x0 + tw, base]], { width: 3.5, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
       ctx.globalAlpha = 0.8;
-      D.line(ctx, x, base - up + 5, x, base - 2, { width: 1.8, color: D.COL.accent, passes: 1 }); // danger glint
+      D.line(ctx, xc, base - up + 5, xc, base - 2, { width: 1.8, color: D.COL.accent, passes: 1 }); // danger glint
       ctx.globalAlpha = 1;
     }
   }
