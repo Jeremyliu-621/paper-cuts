@@ -261,7 +261,8 @@ def mechanic_for(description: str) -> dict:
     # The safety net: validate + clamp to NODES. clamp_spec raises ValueError on an
     # unknown node and clamps everything else. A garbage number can never break the match.
     spec = config.clamp_spec(raw)
-    print(f"[serve] mechanic -> node={spec['node']} name={spec['name']!r}")
+    # graph spec: {name, flavor, tags, on:{trigger:[effects]}} (no single 'node' anymore)
+    print(f"[serve] mechanic -> name={spec.get('name')!r} tags={spec.get('tags')} triggers={list((spec.get('on') or {}).keys())}")
     return spec
 
 
