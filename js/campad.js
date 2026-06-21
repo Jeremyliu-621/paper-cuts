@@ -140,8 +140,8 @@
     else { stopCamera(); setStatus(''); }
   }
 
+  // The 'C' keyboard toggle is REMOVED — like the 'D' draw pad, this PC-side camera test panel doesn't
+  // fit the iPad-gated demo flow (and 'C' isn't a game key, but it opened an incoherent webcam panel).
+  // DS.CamPad.toggle() stays callable from the console; nothing auto-binds a key.
   DS.CamPad = { toggle: toggle };
-  global.addEventListener('keydown', function (e) {
-    if (e.code === 'KeyC' && !e.repeat && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) toggle();
-  });
 })(window);

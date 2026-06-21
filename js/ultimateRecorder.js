@@ -122,7 +122,7 @@
     loadingPose = import(POSE_CDN).then(async (vision) => {
       const fileset = await vision.FilesetResolver.forVisionTasks(WASM_CDN);
       landmarker = await vision.PoseLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
+        baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' }, // CPU: GPU delegate fails on Safari
         runningMode: 'VIDEO',
         numPoses: 1,
       });
