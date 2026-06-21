@@ -301,6 +301,8 @@
   const menu = document.getElementById('menu-overlay');
   const menuModes = document.getElementById('menu-modes');
   const menuMaps = document.getElementById('menu-maps');
+  const menuPreview = document.getElementById('menu-preview');
+  const menuPreviewName = document.getElementById('menu-preview-name');
   const lobby = document.getElementById('lobby-overlay');
   const lobbyQR = document.getElementById('lobby-qr');
   const lobbyPlayers = document.getElementById('lobby-players');
@@ -388,17 +390,67 @@
     paintCanvas(cv, 88, 60, (ctx) => (kind === 'mode' ? drawModeIcon : drawMapIcon)(ctx, id, 88, 60));
     return bt;
   }
+  // a big, colour-coded game-mode card: large doodle icon, mode name, win-condition subtitle
+  function modeCard(m, sel, onclick) {
+    const bt = mkEl('button', 'ss-mode' + (sel ? ' sel' : '')); bt.dataset.mode = m.id;
+    const cv = document.createElement('canvas'); bt.appendChild(cv);
+    const txt = mkEl('div', 'ss-mode-txt');
+    txt.appendChild(mkEl('div', 'ss-mode-name', m.name));
+    txt.appendChild(mkEl('div', 'ss-mode-win', m.win || ''));
+    bt.appendChild(txt); bt.onclick = onclick;
+    paintCanvas(cv, 72, 56, (ctx) => drawModeIcon(ctx, m.id, 72, 56));
+    return bt;
+  }
+  // a single map thumbnail in the Smash-style right-hand grid
+  function mapTile(id, name, sel, onSelect, onHover) {
+    const bt = mkEl('button', 'ss-map' + (sel ? ' sel' : '')); const cv = document.createElement('canvas');
+    bt.appendChild(cv); bt.appendChild(mkEl('div', 'ic-name', name));
+    bt.onclick = onSelect; bt.onmouseenter = onHover;
+    paintCanvas(cv, 96, 64, (ctx) => drawMapIcon(ctx, id, 96, 64));
+    return bt;
+  }
+  // the big enlarged preview on the left — the REAL scenic stage (background + platforms +
+  // procedural dressing), fitted into the panel, so it reads like a Smash stage screenshot
+  function renderMapPreview(id, name) {
+    const W = 600, H = 400;
+    paintCanvas(menuPreview, W, H, (ctx) => {
+      let stage; try { stage = DS.Maps.stageFor(game.data, id); } catch (e) { stage = null; }
+      if (!stage || !stage.platforms || !stage.platforms.length) return;
+      const ps = stage.platforms; let a = 1e9, b = 1e9, c = -1e9, d = -1e9;
+      for (const p of ps) { a = Math.min(a, p.x); b = Math.min(b, p.y); c = Math.max(c, p.x + p.w); d = Math.max(d, p.y + p.h); }
+      const spanX = c - a, spanY = d - b;
+      // pad: extra sky above (clouds), a little ground below (islands/plants hang down), slim sides
+      const padX = spanX * 0.05 + 70, padTop = spanY * 0.45 + 150, padBot = spanY * 0.28 + 110;
+      const wx0 = a - padX, wx1 = c + padX, wy0 = b - padTop, wy1 = d + padBot;
+      const sc = Math.min(W / (wx1 - wx0), H / (wy1 - wy0));
+      const ww = (wx1 - wx0) * sc, hh = (wy1 - wy0) * sc;
+      ctx.save();
+      ctx.translate((W - ww) / 2 - wx0 * sc, (H - hh) / 2 - wy0 * sc);
+      ctx.scale(sc, sc);
+      DS.stage.drawBackground(ctx, stage, null, null);
+      DS.stage.drawStage(ctx, stage, null, null);
+      ctx.restore();
+    });
+    menuPreviewName.textContent = name;
+  }
 
   // ---- setup page ----
   function buildSetup() {
-    menuModes.innerHTML = ''; DS.Modes.list().forEach((m) => menuModes.appendChild(iconCard('mode', m.id, m.name, selMode === m.id, () => { selMode = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
-    menuMaps.innerHTML = '';
+    menuModes.innerHTML = ''; DS.Modes.list().forEach((m) => menuModes.appendChild(modeCard(m, selMode === m.id, () => { selMode = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
     const maps = DS.Maps.list().slice();
     if (selMap && !maps.some((m) => m.id === selMap)) {
       const custom = DS.Maps.get(selMap);
       maps.unshift({ id: selMap, name: (custom && custom.name) || 'Custom Level' });
     }
-    maps.forEach((m) => menuMaps.appendChild(iconCard('map', m.id, m.name, selMap === m.id, () => { selMap = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
+    menuMaps.innerHTML = '';
+    maps.forEach((m) => menuMaps.appendChild(mapTile(m.id, m.name, selMap === m.id,
+      () => { selMap = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); },
+      () => renderMapPreview(m.id, m.name))));
+    const sm = maps.find((m) => m.id === selMap) || maps[0];
+    if (sm) selMap = sm.id;
+    // hovering a tile previews it; leaving the grid snaps back to the chosen map
+    menuMaps.onmouseleave = () => { if (sm) renderMapPreview(sm.id, sm.name); };
+    if (sm) renderMapPreview(sm.id, sm.name);
   }
   function openMenu() {
     if (worldLibrary) worldLibrary.close();

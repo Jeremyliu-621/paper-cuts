@@ -136,45 +136,6 @@
         desc: 'A sunny field with rolling hills, trees and a flower-strewn ground. The stage the Editor edits.',
       },
 
-      // Two stone mesas over a deep chasm, crossed by stepping planks and a swinging
-      // rope-bridge; a high stone perch up top; crates to smash. Mountains + a keep behind.
-      twin: {
-        id: 'twin', name: 'Twin Peaks',
-        desc: 'Stone mesas across a chasm, linked by a swinging rope-bridge. Smash the crates, fight for the high perch.',
-        build() {
-          return {
-            bounds: { x0: -320, y0: -220, x1: 2240, y1: 1280 },
-            platforms: [
-              { x: -200, y: 980, w: 760, h: 300, kind: 'stone', pass: false }, // left mesa
-              { x: 1360, y: 980, w: 760, h: 300, kind: 'stone', pass: false }, // right mesa
-              { x: 520,  y: 800, w: 180, h: 26, kind: 'wood', pass: true },     // stepping planks
-              { x: 1220, y: 800, w: 180, h: 26, kind: 'wood', pass: true },
-              { x: 760,  y: 430, w: 400, h: 34, kind: 'stone', pass: true },    // high perch (KotH hill)
-              // swinging rope-bridge plank across the chasm
-              { x: 860, y: 640, w: 210, h: 26, kind: 'wood', pass: true, move: { type: 'swing', pivotX: 960, pivotY: 300, len: 352, arc: 0.5, period: 3.4 } },
-              // breakable crates stacked on the mesas
-              { x: 110, y: 900, w: 80, h: 80, kind: 'box', pass: false, hp: 3 },
-              { x: 110, y: 820, w: 80, h: 80, kind: 'box', pass: false, hp: 3 },
-              { x: 1900, y: 900, w: 80, h: 80, kind: 'box', pass: false, hp: 3 },
-            ],
-            spawns: [{ x: 200, y: 880 }, { x: 1720, y: 880 }],
-            bg: [
-              { type: 'mountain', x: 240, y: 1010, w: 760, h: 560, s: 1, a: 0.32 },
-              { type: 'mountain', x: 1740, y: 1010, w: 820, h: 620, s: 1, a: 0.3 },
-              { type: 'tower', x: 960, y: 1010, w: 230, h: 600, s: 1, a: 0.42 }, // keep whose top meets the perch
-              { type: 'hill', x: 1000, y: 1020, w: 1500, h: 240, s: 1, a: 0.2 },
-            ],
-            decor: [
-              { type: 'cloud', x: 320, y: 150, s: 1.6 }, { type: 'cloud', x: 1640, y: 200, s: 1.8 },
-              { type: 'pine', x: 60, y: 980, s: 1.5 }, { type: 'pine', x: 1840, y: 980, s: 1.4 },
-              { type: 'bush', x: 430, y: 968, s: 1.4 }, { type: 'bush', x: 1500, y: 968, s: 1.4 },
-              { type: 'grass', x: 300, y: 975, s: 1.4 }, { type: 'grass', x: 1660, y: 975, s: 1.4 },
-              { type: 'vine', x: 820, y: 462, s: 1 }, { type: 'vine', x: 1100, y: 462, s: 1 },
-            ],
-          };
-        },
-      },
-
       // Floating wooden platforms in the clouds, a swinging plank, a crystal top tier,
       // hanging vines and sky-islands behind. No big ground — fall and you're gone.
       loft: {
@@ -244,46 +205,6 @@
               { type: 'reeds', x: 220, y: 998, s: 1.4 }, { type: 'reeds', x: 1700, y: 998, s: 1.4 },
               { type: 'flower', x: 460, y: 996, s: 1.4 }, { type: 'bush', x: 1300, y: 990, s: 1.4 },
               { type: 'grass', x: 720, y: 998, s: 1.4 }, { type: 'grass', x: 1180, y: 998, s: 1.4 },
-            ],
-          };
-        },
-      },
-
-      // Ancient ruins: two stone terraces over a central pit, column-top platforms that
-      // line up under broken arches, a swinging gate, and rubble crates to break.
-      ruins: {
-        id: 'ruins', name: 'Ruins',
-        desc: 'Crumbling stone terraces over a pit, with column-top ledges beneath broken arches and a swinging gate.',
-        build() {
-          return {
-            bounds: { x0: -360, y0: -240, x1: 2440, y1: 1280 },
-            platforms: [
-              { x: -260, y: 980, w: 1000, h: 300, kind: 'stone', pass: false }, // left terrace
-              { x: 1300, y: 980, w: 1000, h: 300, kind: 'stone', pass: false }, // right terrace (pit between 740..1300)
-              { x: 470, y: 700, w: 240, h: 32, kind: 'stone', pass: true },     // column-top ledges
-              { x: 1330, y: 700, w: 240, h: 32, kind: 'stone', pass: true },
-              { x: 850, y: 470, w: 360, h: 34, kind: 'stone', pass: true },     // high altar (KotH hill)
-              // swinging gate across the pit
-              { x: 920, y: 680, w: 200, h: 26, kind: 'wood', pass: true, move: { type: 'swing', pivotX: 1020, pivotY: 320, len: 372, arc: 0.5, period: 3.6 } },
-              // rubble crates
-              { x: 200, y: 900, w: 80, h: 80, kind: 'box', pass: false, hp: 3 },
-              { x: 1760, y: 900, w: 80, h: 80, kind: 'box', pass: false, hp: 3 },
-              { x: 1840, y: 900, w: 80, h: 80, kind: 'box', pass: false, hp: 2 },
-            ],
-            spawns: [{ x: 260, y: 880 }, { x: 1780, y: 880 }],
-            bg: [
-              { type: 'arch', x: 590, y: 700, w: 360, h: 230, s: 1, a: 0.4 },   // arches framing the column ledges
-              { type: 'arch', x: 1450, y: 700, w: 360, h: 230, s: 1, a: 0.4 },
-              { type: 'arch', x: 1030, y: 470, w: 480, h: 300, s: 1, a: 0.42 }, // big arch over the altar
-              { type: 'mountain', x: 200, y: 1010, w: 720, h: 480, s: 1, a: 0.22 },
-              { type: 'mountain', x: 1840, y: 1010, w: 760, h: 520, s: 1, a: 0.2 },
-            ],
-            decor: [
-              { type: 'cloud', x: 360, y: 170, s: 1.6 }, { type: 'cloud', x: 1700, y: 210, s: 1.7 },
-              { type: 'vine', x: 510, y: 728, s: 1.1 }, { type: 'vine', x: 1450, y: 728, s: 1.1 },
-              { type: 'vine', x: 900, y: 500, s: 1 }, { type: 'vine', x: 1120, y: 500, s: 1 },
-              { type: 'reeds', x: 360, y: 975, s: 1.4 }, { type: 'bush', x: 1560, y: 968, s: 1.4 },
-              { type: 'mushroom', x: 620, y: 975, s: 1.2 },
             ],
           };
         },

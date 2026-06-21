@@ -149,8 +149,14 @@
     };
   }
 
-  function makeCharacter(name, head, accent) {
-    return { name, head, accent, stats: defaultStats(), actions: defaultActions() };
+  // Ddoski the Bear — the built-in fighter, a hand-traced 6-part skin (head/body/arms) drawn in
+  // the editor, simplified (RDP) to ~145 points so it animates without lag. Drawn via DS.skin.
+  const DDOSKI_SKIN = {"enabled":true,"offsetY":14,"parts":{"head":{"strokes":[{"pts":[[21.5,-17.6],[23.7,-19.7]],"w":2.4},{"pts":[[21.3,-16.6],[22.9,-18.1]],"w":2.4},{"pts":[[22.9,-18.1]],"w":2.4},{"pts":[[21.8,-30.3],[21.9,-30]],"w":2.4},{"pts":[[21.1,-30.2],[24.2,-24.9],[23.8,-20.5]],"w":2.4},{"pts":[[21.4,-30.6],[19.3,-32],[13.9,-32.5],[10,-30],[8.3,-27.3]],"w":2.4},{"pts":[[-12.4,-26.3],[-0.6,-28.8],[7.3,-27.8]],"w":2.4},{"pts":[[-1.3,-29.3],[-8.3,-28.2]],"w":2.4},{"pts":[[-22.4,-30.5],[-15.3,-29.7],[-12.2,-25.5]],"w":2.4},{"pts":[[-22.2,-30.3],[-26.4,-27.6],[-29,-23.6],[-30,-16.9]],"w":2.4},{"pts":[[-30,-16.9],[-28.7,-13.6],[-24.8,-10.8]],"w":2.4},{"pts":[[-21.9,-15.1],[-18.7,-20.2],[-15.3,-22]],"w":2.4},{"pts":[[-15.3,-22],[-18.2,-24.4],[-21.8,-23.8],[-24,-20.1],[-23.5,-17.2],[-22,-15.5]],"w":2.4},{"pts":[[9.2,-26.9],[17.3,-21.9],[21,-17.2]],"w":2.4},{"pts":[[12.8,-26.5],[16.3,-27.3],[19.2,-25.7],[18.7,-19.9]],"w":2.4},{"pts":[[-6,-17.9],[-8.2,-17.3],[-8.7,-14.5],[-6.7,-13.3],[-3.1,-14.2],[-3.3,-16.8],[-6.5,-17.6]],"w":2.4},{"pts":[[12.5,-19.1],[10.4,-18.2],[10.4,-16],[13.9,-15.1],[15.5,-16.4],[14.6,-18.6],[12.5,-19]],"w":2.4},{"pts":[[-6.8,-11.1],[-10,-9.6],[-12.1,-5.1],[-11.1,2.1],[-8,4.7],[-4.1,4.5],[-1.5,-1.9],[-3.9,-10.2],[-6.4,-10.9]],"w":2.4},{"pts":[[-5.8,-9.6],[-8,-6.7],[-7.9,-0.2],[-7,1.5],[-4.5,2.4],[-7.9,-5.2],[-7.7,-7.8],[-5.6,-9.4],[-6.6,-5.4],[-5.9,-4.1],[-3.2,-3.8],[-5.3,-0.1],[-5.7,-2.6],[-3.4,-0.6],[-4.2,0.5],[-2.8,-2.1]],"w":2.4},{"pts":[[16.5,-11.1],[14.9,-9.6],[14.9,-6.8],[16.6,-1.7],[16.1,-4.3],[14.2,-5.9],[14.3,-9.1],[16,-11.2]],"w":2.4},{"pts":[[13.8,-5.4],[15.5,-1.9],[18.3,-0.3]],"w":2.4},{"pts":[[11,-3.9],[10.6,-8.8],[11.8,-11.3],[16.3,-13],[18.3,-11.1]],"w":2.4},{"pts":[[20.1,-1.6],[16,-7.1],[18.5,-0.6],[20,-4.7],[20,-3.6],[17.8,-5.8],[20.5,-3.7]],"w":2.4},{"pts":[[19.6,-10.8]],"w":2.4},{"pts":[[19.3,-10.8],[19.8,-6]],"w":2.4},{"pts":[[21,-17.1],[24.9,-4.5],[25.2,3.3],[23.1,7.7],[19.5,11.6],[10.6,15.3]],"w":2.4},{"pts":[[-25.4,-11.8],[-25.8,1.2],[-22.9,9.1],[-17,13.1]],"w":2.4},{"pts":[[4.4,-2.9],[10.8,-2.6],[13.3,3.2],[12.7,5.8],[9.9,8.7],[4.8,9.8],[1.5,7.7],[0.1,3.6],[1.2,-0.3],[3.9,-2.9]],"w":2.4},{"pts":[[5.4,0.9],[10,0.3],[8.3,2.7],[5.7,1.5]],"w":2.4},{"pts":[[19.8,-0.4],[17.5,1.6],[13.5,1.9]],"w":2.4},{"pts":[[-1.2,17],[6.3,16.9],[10.5,15.3],[4,16.6]],"w":2.4},{"pts":[[-17.5,13.6],[-8.1,16.6],[-1.2,17]],"w":2.4}]},"body":{"strokes":[{"pts":[[-10.2,2.6],[-12,10.7]],"w":4.25},{"pts":[[9.3,-5],[13.8,9.5]],"w":4.25},{"pts":[[-11.5,10.6],[-1.1,13.4],[4.6,13.4],[14.6,10.2]],"w":4.25},{"pts":[[-10.7,3],[-8.8,-4.5],[-8.8,-10.5]],"w":4.25},{"pts":[[7.8,-10.4],[8.3,-5.5],[9.3,-4.9]],"w":4.25}]},"armFront":{"strokes":[{"pts":[[11.5,-5.7],[16.4,-1.3],[19.5,3.6]],"w":4.25},{"pts":[[20.4,4.5],[13.3,9.5]],"w":4.25},{"pts":[[19.6,5.3],[21.1,15.4],[19.3,17.4],[14.4,17.8],[11.5,15.2],[9.1,11]],"w":4.25},{"pts":[[9.2,10.7],[12.7,9.3]],"w":4.25},{"pts":[[8.8,3],[9.3,10.7]],"w":4.25}]},"armBack":{"strokes":[{"pts":[[-13.7,-4.4],[-17.9,0.2],[-20.6,5.1]],"w":4.25},{"pts":[[-20.6,5.1],[-10,10.6]],"w":4.25},{"pts":[[-7.3,5.2],[-9.5,10.7]],"w":4.25},{"pts":[[-10.3,11.3],[-12.8,19.5],[-18.8,20.1],[-21.7,13.3],[-19.9,5.8]],"w":4.25}]},"legFront":{"strokes":[{"pts":[[13.6,-0.7],[14.2,11.5]],"w":4.25},{"pts":[[14.2,11.5],[14.7,15.5],[13.7,17.6],[8.9,19.4],[4.1,18.8],[1,12.6],[1.2,5.4]],"w":4.25}]},"legBack":{"strokes":[{"pts":[[-12.4,0.5],[-13.7,17.2]],"w":4.25},{"pts":[[-13.4,16.6],[-6.8,19.7],[-0.4,18.4],[1.1,16.3],[0.9,6.1]],"w":4.25}]}}};
+
+  function makeCharacter(name, head, accent, skin) {
+    const c = { name, head, accent, stats: defaultStats(), actions: defaultActions() };
+    if (skin) c.skin = JSON.parse(JSON.stringify(skin));
+    return c;
   }
 
   // ---- default content -----------------------------------------------------
@@ -197,18 +203,18 @@
         ],
       },
       characters: {
-        // the built-in fighters are Oski the Bear (UC Berkeley's mascot) — same rig, bear head
-        Sprout: makeCharacter('Sprout', 'bear', '#5b8c5a'),
-        Acorn: makeCharacter('Acorn', 'bear', '#9c6b3f'),
+        // the built-in fighters wear the hand-drawn Ddoski bear skin (animates via DS.skin)
+        Sprout: makeCharacter('Sprout', 'none', '#5b8c5a', DDOSKI_SKIN),
+        Acorn: makeCharacter('Acorn', 'none', '#9c6b3f', DDOSKI_SKIN),
       },
       roster: ['Sprout', 'Acorn'],
     };
   }
 
   // ---- store ---------------------------------------------------------------
-  // v3 enriches the Meadow stage (background hills, trees, plants). Bumping the key
-  // lets the new defaults load instead of an older save's plainer stage winning the merge.
-  const KEY = 'doodle-smash:data:v3';
+  // Bumping the key forces fresh defaults to load instead of an older save winning the merge.
+  // v16: Ddoski offsetY 14 (feet on the ground).
+  const KEY = 'doodle-smash:data:v16';
 
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
@@ -239,15 +245,7 @@
   function mergeDefaults(d) {
     const base = defaults();
     if (!d || typeof d !== 'object') return base;
-    const targetVersion = base.version;        // capture before Object.assign overwrites base.version
     const out = Object.assign(base, d);
-    // one-time (saves before v4): the built-in fighters became Oski the Bear. flip the old
-    // built-in heads to 'bear' once, without touching characters the user deliberately changed.
-    if ((d.version || 0) < 4) {
-      if (out.characters && out.characters.Sprout && out.characters.Sprout.head === 'spikes') out.characters.Sprout.head = 'bear';
-      if (out.characters && out.characters.Acorn && out.characters.Acorn.head === 'beanie') out.characters.Acorn.head = 'bear';
-    }
-    out.version = targetVersion;
     out.settings = Object.assign(base.settings, d.settings || {});
     // blast bounds are derived from the view and not user-editable, so always take the
     // current defaults (lets existing saves pick up the bigger KO bounds)

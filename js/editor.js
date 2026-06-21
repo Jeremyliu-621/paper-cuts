@@ -24,7 +24,12 @@
       // draw-tool state
       this.brush = 5; this.drawMode = 'auto'; this.draw = null; this.strokeHistory = [];
       this.finisherVictimName = null; this.finisherStatus = '';
+      this.erase = false; this.erasing = false; // eraser: drag to delete strokes on contact
       this.Z = 8; // mannequin zoom (mannequin units -> view px)
+      // trace-tab state: a reference image (loaded from disk) imprinted behind the canvas to trace.
+      this.traceImg = null; this.traceLoaded = false;
+      this.traceShow = true; this.traceAlpha = 0.4;
+      this.traceScale = 0.12; this.traceX = 0; this.traceY = -10;
       this._bindCanvas();
     }
     get data() { return DS.Store.data; }
@@ -68,7 +73,7 @@
     build() {
       const p = this.panel; p.innerHTML = '';
       const tabs = el('div', 'ed-seg');
-      [['characters', 'Characters'], ['draw', 'Draw'], ['stage', 'Stage'], ['settings', 'Settings']].forEach(([t, label]) => {
+      [['characters', 'Characters'], ['draw', 'Draw'], ['trace', 'Trace'], ['stage', 'Stage'], ['settings', 'Settings']].forEach(([t, label]) => {
         const b = el('button', this.subtab === t ? 'on' : '', label);
         b.onclick = () => { this.subtab = t; this.build(); };
         tabs.appendChild(b);
@@ -77,6 +82,7 @@
 
       if (this.subtab === 'characters') this._buildChars(p);
       else if (this.subtab === 'draw') this._buildDraw(p);
+      else if (this.subtab === 'trace') this._buildTrace(p);
       else if (this.subtab === 'stage') this._buildStage(p);
       else this._buildSettings(p);
 
@@ -209,6 +215,11 @@
       p.appendChild(el('div', 'ed-note', this.drawMode === 'auto' ? 'Auto: strokes snap to the nearest body part.' : 'Locked to "' + this.drawMode + '" — every stroke goes here.'));
 
       this._slider(p, 'brush size', 2, 14, 1, () => this.brush, (v) => this.brush = v);
+
+      const erRow = el('div', 'ed-btns');
+      const erBtn = el('button', this.erase ? 'on' : '', this.erase ? '🧽 Eraser — ON (drag to erase)' : '🧽 Eraser');
+      erBtn.onclick = () => { this.erase = !this.erase; this.build(); };
+      erRow.appendChild(erBtn); p.appendChild(erRow);
 
       const tog = el('div', 'ed-row'); tog.appendChild(el('label', '', 'use drawing'));
       const cb = el('input'); cb.type = 'checkbox'; cb.checked = ch.skin.enabled;
@@ -343,6 +354,71 @@
           return;
         }
       }
+    }
+
+    // Trace tab: load a reference image from disk, imprint it faint behind the canvas, and trace
+    // it into the 6 skin parts (same pipeline as Draw, so the trace animates as the fighter).
+    _buildTrace(p) {
+      const ch = this.data.characters[this.charName];
+      this._ensureSkin(ch);
+
+      const row = el('div', 'ed-row'); row.appendChild(el('label', '', 'Character'));
+      const sel = el('select');
+      this.data.roster.forEach((n) => { const o = el('option', '', n); o.value = n; if (n === this.charName) o.selected = true; sel.appendChild(o); });
+      sel.onchange = () => { this.charName = sel.value; this.build(); };
+      row.appendChild(sel); p.appendChild(row);
+
+      p.appendChild(el('div', 'ed-note', 'Load a reference, line it up with the sliders, then LOCK "Draw into" to one body part and trace it. Your trace becomes the fighter and animates.'));
+
+      // reference: load from disk (no server/path dependency) + alignment controls
+      p.appendChild(el('h3', '', 'Reference'));
+      const loadRow = el('div', 'ed-btns');
+      const fi = el('input'); fi.type = 'file'; fi.accept = 'image/*'; fi.style.display = 'none';
+      fi.onchange = () => {
+        const f = fi.files && fi.files[0]; if (!f) return;
+        const r = new FileReader();
+        r.onload = () => { const img = new Image(); img.onload = () => { this.traceLoaded = true; }; img.src = r.result; this.traceImg = img; };
+        r.readAsDataURL(f);
+      };
+      const loadBtn = el('button', '', this.traceLoaded ? '📷 Load a different image…' : '📷 Load reference image…');
+      loadBtn.onclick = () => fi.click();
+      loadRow.appendChild(loadBtn); loadRow.appendChild(fi); p.appendChild(loadRow);
+
+      const tog = el('div', 'ed-row'); tog.appendChild(el('label', '', 'show reference'));
+      const cb = el('input'); cb.type = 'checkbox'; cb.checked = this.traceShow;
+      cb.onchange = () => { this.traceShow = cb.checked; }; tog.appendChild(cb); p.appendChild(tog);
+      this._slider(p, 'ref opacity', 0.05, 0.85, 0.05, () => this.traceAlpha, (v) => this.traceAlpha = v);
+      this._slider(p, 'ref size', 0.02, 0.4, 0.005, () => this.traceScale, (v) => this.traceScale = v);
+      this._slider(p, 'ref left/right', -80, 80, 1, () => this.traceX, (v) => this.traceX = v);
+      this._slider(p, 'ref up/down', -100, 100, 1, () => this.traceY, (v) => this.traceY = v);
+
+      // which part each traced stroke goes into (lock it per part for a clean trace)
+      p.appendChild(el('h3', '', 'Draw into'));
+      const modes = [['auto', 'Auto'], ['head', 'Head'], ['body', 'Body'], ['armFront', 'Arm front'], ['armBack', 'Arm back'], ['legFront', 'Leg front'], ['legBack', 'Leg back']];
+      const seg = el('div', 'ed-seg');
+      modes.forEach(([m, label]) => { const b = el('button', this.drawMode === m ? 'on' : '', label); b.onclick = () => { this.drawMode = m; this.build(); }; seg.appendChild(b); });
+      p.appendChild(seg);
+      this._slider(p, 'brush size', 2, 14, 1, () => this.brush, (v) => this.brush = v);
+      this._slider(p, 'trace up/down', -40, 40, 1, () => (ch.skin.offsetY || 0), (v) => { ch.skin.offsetY = v; });
+
+      const erRow = el('div', 'ed-btns');
+      const erBtn = el('button', this.erase ? 'on' : '', this.erase ? '🧽 Eraser — ON (drag to erase)' : '🧽 Eraser');
+      erBtn.onclick = () => { this.erase = !this.erase; this.build(); };
+      erRow.appendChild(erBtn); p.appendChild(erRow);
+
+      const ut = el('div', 'ed-row'); ut.appendChild(el('label', '', 'use drawing'));
+      const ucb = el('input'); ucb.type = 'checkbox'; ucb.checked = ch.skin.enabled;
+      ucb.onchange = () => { ch.skin.enabled = ucb.checked; this.queueSave(); }; ut.appendChild(ucb); p.appendChild(ut);
+
+      const btns = el('div', 'ed-btns');
+      const mk = (t, fn) => { const b = el('button', '', t); b.onclick = fn; return b; };
+      btns.appendChild(mk('Undo stroke', () => { const part = this.strokeHistory.pop(); if (part && ch.skin.parts[part].strokes.length) { ch.skin.parts[part].strokes.pop(); this.queueSave(); } }));
+      btns.appendChild(mk(this.drawMode !== 'auto' ? 'Clear ' + this.drawMode : 'Clear part', () => { if (this.drawMode !== 'auto') { ch.skin.parts[this.drawMode].strokes = []; this.queueSave(); } }));
+      btns.appendChild(mk('Clear all', () => { if (confirm('Clear the whole drawing?')) { ch.skin = DS.skin.emptySkin(); this.strokeHistory = []; this.queueSave(); } }));
+      p.appendChild(btns);
+
+      const counts = DS.skin.PARTS.map((k) => k + ': ' + ch.skin.parts[k].strokes.length).join('  ·  ');
+      p.appendChild(el('div', 'ed-note', counts));
     }
 
     _buildStage(p) {
@@ -539,6 +615,22 @@
       const v = this._toView(e);
       return { x: (v.x - this.data.view.w / 2) / this.Z, y: (v.y - this.data.view.h / 2) / this.Z };
     }
+    // eraser: delete any stroke (across all parts) whose drawn position is within reach of the
+    // pointer. `m` is in mannequin coords; strokes display at pivot + stored pts + the offsetY.
+    _eraseAt(m) {
+      const ch = this.data.characters[this.charName]; if (!ch.skin) return;
+      const off = ch.skin.offsetY || 0, R = Math.max(7, this.brush + 3);
+      let removed = false;
+      for (const name of DS.skin.PARTS) {
+        const piv = DS.skin.PIVOTS[name], strokes = ch.skin.parts[name].strokes;
+        for (let i = strokes.length - 1; i >= 0; i--) {
+          const s = strokes[i], reach = R + (s.w || 5) / 2;
+          const hit = (s.pts || []).some(([sx, sy]) => Math.hypot((piv.x + sx) - m.x, (piv.y + sy + off) - m.y) < reach);
+          if (hit) { strokes.splice(i, 1); removed = true; }
+        }
+      }
+      if (removed) this.queueSave();
+    }
     _finishStroke() {
       const s = this.draw; this.draw = null;
       if (!s || !s.pts.length) return;
@@ -554,10 +646,11 @@
       const cv = this.canvas;
       cv.addEventListener('pointerdown', (e) => {
         if (!this.active) return;
-        if (this.subtab === 'draw') {
+        if (this.subtab === 'draw' || this.subtab === 'trace') {
           const m = this._toMan(e);
-          this.draw = { pts: [[m.x, m.y]], w: this.brush };
           try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+          if (this.erase) { this.erasing = true; this._eraseAt(m); return; }
+          this.draw = { pts: [[m.x, m.y]], w: this.brush };
           return;
         }
         if (this.subtab !== 'stage') return;
@@ -591,6 +684,7 @@
         this.selPlat = null; this.selPortal = null; this.build();
       });
       window.addEventListener('pointermove', (e) => {
+        if (this.erasing) { this._eraseAt(this._toMan(e)); return; }
         if (this.draw) { const m = this._toMan(e); this.draw.pts.push([m.x, m.y]); return; }
         if (this.platStroke) { const m = this._toStage(e); this.platStroke.pts.push([m.x, m.y]); return; }
         if (!this.drag) return;
@@ -607,6 +701,7 @@
         this.queueSave();
       });
       window.addEventListener('pointerup', () => {
+        if (this.erasing) { this.erasing = false; this.build(); return; }
         if (this.draw) { this._finishStroke(); return; }
         if (this.platStroke) { this._finishPlatStroke(this._stage()); return; }
         if (this.drag) { this.drag = null; this.build(); }
@@ -627,6 +722,7 @@
 
       if (this.subtab === 'characters') this._renderCharPreview(ctx);
       else if (this.subtab === 'draw') this._renderDrawTab(ctx);
+      else if (this.subtab === 'trace') this._renderTraceTab(ctx);
       else { DS.stage.drawBackground(ctx, this.data); DS.stage.drawStage(ctx, this.data); } // settings preview
       ctx.restore();
     }
@@ -657,6 +753,48 @@
       ctx.fillText('Drawing: ' + this.charName, cx, 64);
       ctx.fillStyle = D.COL.inkSoft; ctx.font = "22px 'Patrick Hand', cursive";
       ctx.fillText(this.drawMode === 'auto' ? 'strokes auto-sort into body parts' : 'drawing into: ' + this.drawMode, cx, 92);
+    }
+
+    _renderTraceTab(ctx) {
+      const ch = this.data.characters[this.charName]; this._ensureSkin(ch);
+      const cx = this.data.view.w / 2, cy = this.data.view.h / 2, Z = this.Z;
+      const rnd = DS.makeRng(7);
+
+      ctx.save();
+      ctx.translate(cx, cy); ctx.scale(Z, Z);
+      // the reference, imprinted faint behind everything (positioned in mannequin space)
+      const refReady = this.traceShow && this.traceLoaded && this.traceImg && this.traceImg.naturalWidth;
+      if (refReady) {
+        const iw = this.traceImg.naturalWidth, ih = this.traceImg.naturalHeight, s = this.traceScale;
+        ctx.save(); ctx.globalAlpha = this.traceAlpha;
+        ctx.drawImage(this.traceImg, -iw * s / 2 + this.traceX, -ih * s / 2 + this.traceY, iw * s, ih * s);
+        ctx.restore();
+      }
+      // faint mannequin so the part regions are clear; active part highlighted
+      DS.skin.drawMannequin(ctx, this.drawMode);
+      // strokes traced so far (shifted by the trace up/down offset, matching the in-game render)
+      ctx.save(); if (ch.skin.offsetY) ctx.translate(0, ch.skin.offsetY);
+      DS.skin.PARTS.forEach((name) => {
+        const pt = ch.skin.parts[name]; if (!pt.strokes.length) return;
+        ctx.save(); ctx.translate(DS.skin.PIVOTS[name].x, DS.skin.PIVOTS[name].y);
+        DS.skin.drawStrokes(ctx, pt.strokes, rnd); ctx.restore();
+      });
+      ctx.restore();
+      // the stroke being traced right now (accent colour)
+      if (this.draw && this.draw.pts.length) {
+        DS.draw.strokePts(ctx, this.draw.pts, { width: this.draw.w, color: DS.draw.COL.accent, rnd, jitter: 0.3, passes: 1 });
+      }
+      ctx.restore();
+
+      ctx.fillStyle = D.COL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.font = "30px 'Gloria Hallelujah', cursive";
+      ctx.fillText('Tracing: ' + this.charName, cx, 64);
+      ctx.fillStyle = D.COL.inkSoft; ctx.font = "22px 'Patrick Hand', cursive";
+      ctx.fillText(this.drawMode === 'auto' ? 'lock a body part, then trace it' : 'tracing into: ' + this.drawMode, cx, 92);
+      if (!refReady && this.traceShow) {
+        ctx.fillStyle = D.COL.accent; ctx.font = "22px 'Patrick Hand', cursive";
+        ctx.fillText('click “Load reference image…” to trace over a picture', cx, this.data.view.h - 40);
+      }
     }
 
     // Stage tab: frame the WHOLE selected map (it can be far bigger than the 1920x1080 view),

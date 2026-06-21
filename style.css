@@ -488,6 +488,67 @@ body{
 .icon-card canvas{width:88px;height:60px;}
 .ic-name{font-family:'Gloria Hallelujah',cursive;font-size:15px;}
 
+/* ---- Smash-style stage select: mode bar on top, big preview left, map grid right ---- */
+.stage-select{width:min(1240px,98vw);display:flex;flex-direction:column;gap:16px;padding:14px 14px 6px;}
+.ss-topbar{display:flex;align-items:center;gap:22px;flex-wrap:wrap;
+  border-bottom:var(--line) solid var(--ink);padding-bottom:16px;}
+.ss-heading{flex:0 0 auto;display:flex;flex-direction:column;}
+.ss-title{font-size:36px;margin:0;text-align:left;}
+.ss-modelabel{font-family:'Patrick Hand',cursive;font-size:16px;letter-spacing:2px;
+  text-transform:uppercase;color:var(--ink-soft);}
+/* big, colour-coded mode cards */
+.ss-modes{display:flex;gap:13px;flex-wrap:wrap;flex:1;justify-content:flex-end;}
+.ss-mode{--m:var(--accent);font-family:inherit;cursor:pointer;position:relative;
+  border:var(--line) solid var(--ink);border-radius:17px 13px 18px 14px;
+  background:var(--paper);color:var(--ink);padding:18px 16px 14px;min-width:138px;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  box-shadow:3px 4px 0 rgba(47,42,38,.13);transition:transform .08s ease,box-shadow .08s ease;}
+.ss-mode::before{content:'';position:absolute;top:7px;left:12px;right:12px;height:6px;
+  border-radius:4px;background:var(--m);}
+.ss-mode[data-mode="smash"]{--m:#c0603a;}
+.ss-mode[data-mode="mayhem"]{--m:#d68b2c;}
+.ss-mode[data-mode="koth"]{--m:#b58a2e;}
+.ss-mode[data-mode="gems"]{--m:#3f6fa0;}
+.ss-mode[data-mode="bounty"]{--m:#9a6cb0;}
+.ss-mode canvas{width:72px;height:56px;display:block;}
+.ss-mode-txt{display:flex;flex-direction:column;align-items:center;gap:2px;}
+.ss-mode-name{font-family:'Gloria Hallelujah',cursive;font-size:16px;line-height:1.1;text-align:center;
+  min-height:2.2em;display:flex;align-items:center;justify-content:center;}
+.ss-mode-win{font-family:'Patrick Hand',cursive;font-size:12.5px;color:var(--ink-soft);
+  line-height:1.2;text-align:center;padding-bottom:1px;}
+.ss-mode:hover{transform:translateY(-3px) rotate(-1deg);box-shadow:4px 7px 0 rgba(47,42,38,.2);}
+.ss-mode.sel{background:var(--ink);color:var(--paper);transform:translateY(-2px) rotate(-1deg);
+  box-shadow:4px 7px 0 rgba(47,42,38,.24),0 0 0 4px var(--m);}
+.ss-mode.sel .ss-mode-win{color:rgba(246,241,231,.78);}
+
+.ss-body{display:flex;gap:22px;align-items:stretch;}
+/* big enlarged preview of the selected (or hovered) map — a framed "screen" */
+.ss-preview{flex:0 0 50%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  position:relative;border:var(--line) solid var(--ink);border-radius:24px 18px 25px 19px;
+  background:linear-gradient(170deg,#eef2f6 0%,var(--paper-2) 55%,#f1ead9 100%);
+  padding:18px;min-height:360px;box-shadow:6px 7px 0 rgba(47,42,38,.14);
+  transform:rotate(-.5deg);}
+.ss-preview canvas{width:100%;max-width:560px;height:auto;aspect-ratio:3/2;display:block;
+  border-radius:14px;}
+.ss-preview-name{font-family:'Gloria Hallelujah',cursive;font-size:30px;text-align:center;
+  background:var(--ink);color:var(--paper);padding:6px 30px 9px;border-radius:15px 12px 16px 13px;
+  box-shadow:3px 4px 0 rgba(47,42,38,.2);transform:rotate(.6deg);}
+/* the scrollable map grid on the right */
+.ss-maps{flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:14px;
+  align-content:start;max-height:66vh;overflow:auto;padding:4px 6px 4px 2px;}
+.ss-map{font-family:inherit;cursor:pointer;border:var(--line) solid var(--ink);
+  border-radius:15px 12px 16px 13px;background:var(--paper);color:var(--ink);
+  padding:7px 7px 5px;display:flex;flex-direction:column;align-items:center;gap:4px;
+  box-shadow:3px 3px 0 rgba(47,42,38,.12);transition:transform .08s ease,box-shadow .08s ease;}
+.ss-map:hover{transform:translateY(-3px) rotate(-1deg);box-shadow:4px 6px 0 rgba(47,42,38,.18);}
+.ss-map canvas{width:100%;height:auto;aspect-ratio:3/2;display:block;
+  background:var(--paper-2);border-radius:9px;}
+.ss-map .ic-name{font-size:13px;line-height:1.1;text-align:center;}
+.ss-map.sel{background:var(--ink);transform:translateY(-2px) rotate(-1deg);
+  box-shadow:4px 6px 0 rgba(47,42,38,.22),0 0 0 4px var(--accent);}
+.ss-map.sel .ic-name{color:var(--paper);}
+.ss-map.sel canvas{background:var(--paper);}
+
 /* lobby page */
 .lobby-page{display:flex;flex-direction:column;gap:12px;}
 .lobby-top{display:flex;gap:18px;align-items:flex-start;justify-content:center;min-width:0;}

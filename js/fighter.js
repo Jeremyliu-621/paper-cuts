@@ -11,6 +11,10 @@
   const MOM_FAST = 0.4; // momentum needed to count as "fast" (gates super punch / shot / ultra)
   const SPEARWIN = 0.34; // window (s) between an up-press and a jab to launch the SPEAR
   const WOLF_SIZE = 2;   // the werewolf transforms to 2x size (hurtbox, body, and its melee reach)
+  // pose-cache (perf #4): body poses that are STATIC frame-to-frame — no breathing/animation — so
+  // the bitmap is identical every frame and caching is lossless. idle/walk/dash/ledge are animated
+  // (idle breathes — we deliberately keep that live), and attacks animate, so all of those render live.
+  const POSE_CACHE = { jump: 1, fall: 1, crouch: 1, shield: 1, hurt: 1 };
   const CHARGE_NEED = 75; // cumulative % damage dealt to fill the ultimate meter
   // the sniper ultimate's shot: very fast, long, hard-hitting
   const SNIPER_SHOT = { speed: 2400, damage: 42, kbBase: 46, kbScale: 0.18, angle: 0, gravity: 0, life: 0.9, r: 48, sniper: true, ult: true };
@@ -871,8 +875,22 @@
       const drawBody = (alpha) => {
         ctx.save(); ctx.globalAlpha = alpha;
         const opts = { facing: this.facing, color: lineCol, expr: this.expr, blink: this.blinkUntil > 0, seed: this.pIndex * 1009 + 7 };
-        if (isWolf) { ctx.scale(WOLF_SIZE, WOLF_SIZE); DS.character.drawWolf(ctx, this.ch, p, opts); } // 3x beast
-        else DS.character.drawFighter(ctx, this.ch, p, opts);
+        if (isWolf) { ctx.scale(WOLF_SIZE, WOLF_SIZE); DS.character.drawWolf(ctx, this.ch, p, opts); ctx.restore(); return; } // 3x beast
+        // pose cache: a full-opacity static pose blits its pre-baked bitmap instead of re-stroking
+        // ~6 multi-pass limbs. faded frames (invuln/morph) and animated poses fall through to live.
+        if (alpha > 0.999 && POSE_CACHE[this._poseName()]) {
+          const s = (this.ch.stats && this.ch.stats.scale) || 1;
+          const bw = Math.ceil(150 * s), bh = Math.ceil(190 * s), oy = 0.55, q = (v) => Math.round(v / 4) * 4;
+          const key = 'fb|' + this.pIndex + '|' + this.ch.name + '|' + opts.facing + '|' + (opts.expr || '') + '|'
+            + (opts.blink ? 1 : 0) + '|' + (opts.color || 'i') + '|' + bw + 'x' + bh + '|'
+            + q(p.headX || 0) + ',' + q(p.headY || 0) + ',' + q(p.lean || 0) + ',' + Math.round((p.squash || 1) * 40)
+            + ',' + q(p.armFront.sh) + ',' + q(p.armFront.el) + ',' + q(p.armBack.sh) + ',' + q(p.armBack.el)
+            + ',' + q(p.legFront.hip) + ',' + q(p.legFront.knee) + ',' + q(p.legBack.hip) + ',' + q(p.legBack.knee);
+          const bmp = D.getCached(key, bw, bh, (c2) => { c2.translate(bw / 2, bh * oy); DS.character.drawFighter(c2, this.ch, p, opts); });
+          ctx.drawImage(bmp, -bw / 2, -bh * oy, bw, bh);
+        } else {
+          DS.character.drawFighter(ctx, this.ch, p, opts);
+        }
         ctx.restore();
       };
       if (morph) {

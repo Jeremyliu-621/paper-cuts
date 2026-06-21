@@ -69,9 +69,44 @@
       D.strokePts(ctx, s.pts, { width: s.w || 5, color: col, rnd, jitter: 0.35, passes: 1 });
     }
   }
+  // convex hull (monotone chain) of every point in a part's strokes — a rough silhouette
+  // we fill with paper BEHIND the ink so the drawn figure reads as solid, not see-through.
+  function hullOf(strokes) {
+    const pts = [];
+    for (const s of strokes) { if (s.pts) for (const p of s.pts) pts.push(p); }
+    if (pts.length < 3) return null;
+    pts.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lo = [];
+    for (const p of pts) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+    const hi = [];
+    for (let i = pts.length - 1; i >= 0; i--) { const p = pts[i]; while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+    lo.pop(); hi.pop();
+    const h = lo.concat(hi);
+    return h.length >= 3 ? h : null;
+  }
+  // Ddoski reads as a soft-brown bear: the silhouette fill is a light fur tone (kept light so
+  // the ink linework still carries the drawing), with a paler cream belly for a bit of contrast.
+  // It also keeps him opaque so bushes/scenery don't show through the body.
+  const FUR = D.mix(D.COL.paper, '#8a5630', 0.42);    // light brown — head + limbs
+  const BELLY = D.mix(D.COL.paper, '#8a5630', 0.16);  // near-cream chest/tummy — body
+
+  // hull is cached on the part and only recomputed when the stroke count changes (editor edits).
+  function fillSilhouette(ctx, pt, col) {
+    if (!pt || !pt.strokes || !pt.strokes.length) return;
+    if (pt._hullN !== pt.strokes.length) { pt._hull = hullOf(pt.strokes); pt._hullN = pt.strokes.length; }
+    const h = pt._hull;
+    if (!h) return;
+    ctx.beginPath();
+    ctx.moveTo(h[0][0], h[0][1]);
+    for (let i = 1; i < h.length; i++) ctx.lineTo(h[i][0], h[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = col || D.COL.paper;   // fur tone stays put even when the ink is ult-charge blue
+    ctx.fill();
+  }
   function part(ctx, ch, name, rnd, col) {
     const pt = ch.skin.parts[name];
-    if (pt && pt.strokes.length) drawStrokes(ctx, pt.strokes, rnd, col);
+    if (pt && pt.strokes.length) { fillSilhouette(ctx, pt, name === 'body' ? BELLY : FUR); drawStrokes(ctx, pt.strokes, rnd, col); }
   }
   function limb(ctx, ch, name, poseAngle, rnd, col) {
     const pt = ch.skin.parts[name];
@@ -79,6 +114,7 @@
     ctx.save();
     ctx.translate(PIVOTS[name].x, PIVOTS[name].y);
     ctx.rotate(-(poseAngle - REST[name]) * RAD);
+    fillSilhouette(ctx, pt, FUR);
     drawStrokes(ctx, pt.strokes, rnd, col);
     ctx.restore();
   }
@@ -96,6 +132,7 @@
     ctx.rotate(p.lean * facing * RAD * 0.5);
     ctx.scale(facing, 1);                       // face direction
     ctx.scale(1, p.squash || 1);
+    if (ch.skin.offsetY) ctx.translate(0, ch.skin.offsetY); // whole-drawing vertical nudge (editor "trace up/down")
 
     ctx.globalAlpha = 0.82;                      // back limbs sit behind, faded
     limb(ctx, ch, 'armBack', p.armBack.sh, rnd, col);

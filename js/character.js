@@ -41,20 +41,7 @@
   }
 
   function head(ctx, cx, cy, r, headType, facing, expr, blink, col, rnd) {
-    // Oski the Bear: big round ears at the top corners (behind the head), each with an
-    // inner-ear curve — then a glossy-eyed, browed, muzzled chibi face.
-    if (headType === 'bear') {
-      const re = r * 0.4, ey0 = cy - r * 0.76;
-      for (const s of [-1, 1]) {
-        const exC = cx + s * r * 0.64;
-        D.circle(ctx, exC, ey0, re, { width: 5, color: col, rnd, fill: D.COL.paper });   // outer ear
-        D.curve(ctx, [[exC - re * 0.5, ey0 + re * 0.06], [exC, ey0 + re * 0.52], [exC + re * 0.5, ey0 + re * 0.06]], { width: 3, color: col, rnd }); // inner-ear curve
-      }
-    }
-
     D.circle(ctx, cx, cy, r, { width: 5.5, color: col, rnd, wob: 1.2 });
-
-    if (headType === 'bear') { bearFace(ctx, cx, cy, r, facing, expr, blink, col, rnd); return; }
 
     // face (eyes biased toward facing)
     const ex = cx + facing * 4.5, ey = cy + 1, gap = 7;
@@ -90,56 +77,11 @@
     }
   }
 
-  // Oski's face (chibi, matching the reference): a small light muzzle with a rounded nose +
-  // tiny smile, two BIG glossy oval eyes with highlights, and little curved eyebrows.
-  function bearFace(ctx, cx, cy, r, facing, expr, blink, col, rnd) {
-    const fb = facing * r * 0.03;
-    // --- muzzle (light snout) sits low-centre, behind the nose ---
-    const mx = cx + fb, my = cy + r * 0.36, mrx = r * 0.3, mry = r * 0.24;
-    D.ellipse(ctx, mx, my, mrx, mry, { width: 3.5, color: col, rnd, fill: D.COL.paper, wob: 1 });
-
-    // --- big glossy eyes ---
-    const gap = r * 0.35, eyy = cy - r * 0.05, erx = r * 0.2, ery = r * 0.26;
-    for (const s of [-1, 1]) {
-      const exC = cx + fb + s * gap;
-      if (blink || expr === 'shield') {                 // happy closed eye (downward arc)
-        D.curve(ctx, [[exC - erx, eyy], [exC, eyy + ery * 0.55], [exC + erx, eyy]], { width: 3.5, color: col, rnd });
-      } else if (expr === 'hurt') {                      // X eyes
-        D.line(ctx, exC - erx * 0.7, eyy - ery * 0.6, exC + erx * 0.7, eyy + ery * 0.6, { width: 3.5, color: col, rnd, passes: 1 });
-        D.line(ctx, exC + erx * 0.7, eyy - ery * 0.6, exC - erx * 0.7, eyy + ery * 0.6, { width: 3.5, color: col, rnd, passes: 1 });
-      } else {
-        ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(exC, eyy, erx, ery, 0, 0, 7); ctx.fill();          // big black eye
-        ctx.fillStyle = D.COL.paper;
-        ctx.beginPath(); ctx.ellipse(exC + facing * erx * 0.15, eyy - ery * 0.36, erx * 0.46, ery * 0.4, 0.4, 0, 7); ctx.fill(); // big upper catchlight
-        ctx.beginPath(); ctx.arc(exC - facing * erx * 0.28, eyy + ery * 0.38, erx * 0.17, 0, 7); ctx.fill();  // tiny lower sparkle
-      }
-    }
-
-    // --- eyebrows (little curved ovals up top) — drop them when hurt ---
-    if (expr !== 'hurt') {
-      ctx.fillStyle = col;
-      for (const s of [-1, 1]) {
-        ctx.save(); ctx.translate(cx + fb + s * gap * 0.82, eyy - ery - r * 0.13); ctx.rotate(s * -0.22);
-        ctx.beginPath(); ctx.ellipse(0, 0, r * 0.1, r * 0.045, 0, 0, 7); ctx.fill();
-        ctx.restore();
-      }
-    }
-
-    // --- nose + mouth on the muzzle ---
-    ctx.fillStyle = col;
-    ctx.beginPath(); ctx.ellipse(mx, my - mry * 0.28, mrx * 0.42, mry * 0.34, 0, 0, 7); ctx.fill();   // rounded nose
-    if (expr === 'attack') {
-      ctx.beginPath(); ctx.ellipse(mx, my + mry * 0.42, mrx * 0.32, mry * 0.4, 0, 0, 7); ctx.fill();  // open mouth
-    } else {                                              // tiny smile under the nose
-      D.curve(ctx, [[mx - mrx * 0.46, my + mry * 0.22], [mx, my + mry * 0.56], [mx + mrx * 0.46, my + mry * 0.22]], { width: 2.5, color: col, rnd });
-    }
-  }
-
   // Draws a fighter in LOCAL space; caller sets the transform so (0,0) is the
   // fighter center. opts: { facing, color, expr, blink, seed }
   function drawFighter(ctx, ch, p, opts) {
     opts = opts || {};
-    // a hand-drawn skin replaces the parametric stick figure (same rig/joints)
+    // a hand-drawn skin replaces the parametric stick figure (same rig/joints) — Ddoski uses this
     if (DS.skin && DS.skin.hasSkin(ch)) { DS.skin.render(ctx, ch, p, opts); return; }
     const facing = opts.facing || 1;
     const col = opts.color || D.COL.ink;

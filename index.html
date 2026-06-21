@@ -84,12 +84,21 @@
 
       <!-- Setup page: pick a game mode + map (icon tiles, minimal text) -->
       <div id="menu-overlay" class="screen" hidden>
-        <div class="page-card">
-          <div class="menu-title">Doodle&nbsp;Smash</div>
-          <h3>Mode</h3>
-          <div id="menu-modes" class="icon-grid"></div>
-          <h3>Map</h3>
-          <div id="menu-maps" class="icon-grid"></div>
+        <div class="page-card stage-select">
+          <div class="ss-topbar">
+            <div class="ss-heading">
+              <div class="menu-title ss-title">Doodle&nbsp;Smash</div>
+              <div class="ss-modelabel">Choose a mode</div>
+            </div>
+            <div id="menu-modes" class="ss-modes"></div>
+          </div>
+          <div class="ss-body">
+            <div class="ss-preview">
+              <canvas id="menu-preview"></canvas>
+              <div id="menu-preview-name" class="ss-preview-name"></div>
+            </div>
+            <div id="menu-maps" class="ss-maps"></div>
+          </div>
           <div class="menu-footer"><button id="menu-start">Next ▶</button></div>
         </div>
       </div>
