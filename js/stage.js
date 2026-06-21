@@ -70,6 +70,7 @@
     const ctrlA = [(A[0] + Ab[0]) / 2 - taX / La * r * 1.4, (A[1] + Ab[1]) / 2 - taY / La * r * 1.4];
     const ctrlB = [(B[0] + Bb[0]) / 2 + tbX / Lb * r * 1.4, (B[1] + Bb[1]) / 2 + tbY / Lb * r * 1.4];
     const edge = (style === 'crystal' || style === 'bouncy') ? D.COL.accent : D.COL.ink;
+    const body = style === 'wood' ? D.COL.mWood : style === 'stone' ? D.COL.mStone : style === 'crystal' ? D.COL.mCrystal : style === 'bouncy' ? D.mix(D.COL.paper, D.COL.accent, 0.16) : D.COL.mFloat;
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -83,7 +84,7 @@
     };
     // soft cutout shadow + cream body
     ctx.save(); ctx.translate(7, 10); ctx.globalAlpha = 0.1; ribbon(); ctx.fillStyle = D.COL.ink; ctx.fill(); ctx.restore();
-    ribbon(); ctx.fillStyle = D.COL.paper; ctx.fill();
+    ribbon(); ctx.fillStyle = body; ctx.fill();
     if (style === 'crystal' || style === 'bouncy') { ribbon(); ctx.globalAlpha = 0.08; ctx.fillStyle = edge; ctx.fill(); ctx.globalAlpha = 1; }
     // chunky edges + rounded caps
     D.strokePts(ctx, top, { width: 6, color: edge, rnd, passes: 1, jitter: 0.25 });
@@ -146,7 +147,7 @@
 
   function groundPlat(ctx, p, rnd) {
     const r = 20;
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.mGround });
     D.wavy(ctx, p.x + r, p.x + p.w - r, p.y + 16, { amp: 4, wavelen: 30, width: 4, color: D.COL.ink, rnd, passes: 1 });
     ctx.save();
     ctx.setLineDash([3, 16]); ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.strokeStyle = D.COL.ink; ctx.globalAlpha = 0.7;
@@ -163,13 +164,13 @@
 
   function floatPlat(ctx, p, rnd) {
     const r = Math.min(p.h / 2, 16);
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.mFloat });
     D.wavy(ctx, p.x + r, p.x + p.w - r, p.y + 12, { amp: 3, wavelen: 30, width: 4, color: D.COL.ink, rnd, passes: 1 });
   }
 
   function woodPlat(ctx, p, rnd) {
     const r = Math.min(p.h / 2, 9);
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 5, color: D.COL.ink, rnd, fill: D.COL.mWood });
     const boards = Math.max(2, Math.round(p.w / 95));
     for (let i = 1; i < boards; i++) {
       const x = p.x + (p.w * i) / boards;
@@ -188,7 +189,7 @@
 
   function stonePlat(ctx, p, rnd) {
     const r = Math.min(p.h / 2, 12);
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.mStone });
     // offset brick courses
     const rows = Math.max(1, Math.round(p.h / 34));
     ctx.globalAlpha = 0.7;
@@ -209,7 +210,7 @@
 
   function crystalPlat(ctx, p, rnd) {
     const c = D.COL.accent;
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, 6, { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, 6, { width: 5, color: D.COL.ink, rnd, fill: D.COL.mCrystal });
     // faceted top — little triangular crystals poking up along the surface
     const n = Math.max(2, Math.round(p.w / 70));
     for (let i = 0; i < n; i++) {
@@ -226,7 +227,7 @@
 
   // breakable crate; shows more cracks as it loses hp
   function boxPlat(ctx, p, rnd) {
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, 5, { width: 5.5, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, 5, { width: 5.5, color: D.COL.ink, rnd, fill: D.COL.mBox });
     // inset frame + X-brace
     const i = 7;
     D.strokePts(ctx, [[p.x + i, p.y + i], [p.x + p.w - i, p.y + i], [p.x + p.w - i, p.y + p.h - i], [p.x + i, p.y + p.h - i]],
@@ -556,7 +557,8 @@
   // (vine/roots/moss/tendril). Deterministic (seeded per platform box) and cached by a
   // geometry+density key, so it regrows the instant a layout changes and costs no derive time when
   // nothing changed. Purely visual: no collision, zero gameplay impact. Density 0..2.
-  const SCN = BG_INK;                 // every dressing mark is the background gray
+  const SCN = D.COL.stoneSoft;        // structural scenery (pillars/arches/bridges/islands) — soft stone
+  const LEAF = D.COL.leaf, LEAFF = D.COL.leafFill; // foliage (plants/hanging/ivy) — muted green
   const GAP_MIN = 40, PILLAR_MAX = 700; // a gap beyond PILLAR_MAX reads as floating → island, not pillar
   const TOP_KINDS = ['tuft', 'stalk', 'shrub', 'sprout'];
   const TOP_KINDS_BIG = ['tuft', 'stalk', 'shrub', 'sprout', 'sapling'];
@@ -817,18 +819,18 @@
   function drawHang(ctx, it) {
     const rnd = DS.makeRng(it.seed), x = it.x, y = it.y;
     if (it.kind === 'roots') {
-      for (let i = -1; i <= 1; i++) { const len = 44 + rnd() * 30, bx = x + i * 7; D.curve(ctx, [[bx, y], [bx + i * 5, y + len * 0.5], [bx + i * 9, y + len]], { width: 3, color: SCN, rnd, passes: 1 }); }
+      for (let i = -1; i <= 1; i++) { const len = 44 + rnd() * 30, bx = x + i * 7; D.curve(ctx, [[bx, y], [bx + i * 5, y + len * 0.5], [bx + i * 9, y + len]], { width: 3, color: LEAF, rnd, passes: 1 }); }
     } else if (it.kind === 'moss') {
-      for (let i = -1; i <= 1; i++) { const lx = x + i * 12, ll = 14 + rnd() * 16; D.line(ctx, lx, y, lx, y + ll, { width: 2.5, color: SCN, rnd, passes: 1 }); D.circle(ctx, lx, y + ll, 5 + rnd() * 3, { width: 3, color: SCN, rnd, fill: D.COL.paper }); }
+      for (let i = -1; i <= 1; i++) { const lx = x + i * 12, ll = 14 + rnd() * 16; D.line(ctx, lx, y, lx, y + ll, { width: 2.5, color: LEAF, rnd, passes: 1 }); D.circle(ctx, lx, y + ll, 5 + rnd() * 3, { width: 3, color: LEAF, rnd, fill: LEAFF }); }
     } else if (it.kind === 'tendril') {
       const len = 66 + rnd() * 34, pts = [];
       for (let i = 0; i <= 8; i++) { const t = i / 8; pts.push([x + Math.sin(t * 7) * 13 * t, y + t * len]); }
-      D.strokePts(ctx, pts, { width: 3, color: SCN, rnd, passes: 1 }); D.circle(ctx, pts[8][0], pts[8][1], 4, { width: 2.5, color: SCN, rnd });
+      D.strokePts(ctx, pts, { width: 3, color: LEAF, rnd, passes: 1 }); D.circle(ctx, pts[8][0], pts[8][1], 4, { width: 2.5, color: LEAF, rnd });
     } else { // vine: curvy strand with little leaves
       const len = 80, pts = [];
       for (let i = 0; i <= 6; i++) { const t = i / 6; pts.push([x + Math.sin(t * 6) * 8, y + t * len]); }
-      D.strokePts(ctx, pts, { width: 3, color: SCN, rnd, passes: 1 });
-      for (let i = 1; i <= 4; i++) { const t = i / 6, lx = x + Math.sin(t * 6) * 8, ly = y + t * len; D.strokePts(ctx, [[lx, ly], [lx + (i % 2 ? 12 : -12), ly - 3], [lx + (i % 2 ? 8 : -8), ly + 7]], { width: 2.5, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); }
+      D.strokePts(ctx, pts, { width: 3, color: LEAF, rnd, passes: 1 });
+      for (let i = 1; i <= 4; i++) { const t = i / 6, lx = x + Math.sin(t * 6) * 8, ly = y + t * len; D.strokePts(ctx, [[lx, ly], [lx + (i % 2 ? 12 : -12), ly - 3], [lx + (i % 2 ? 8 : -8), ly + 7]], { width: 2.5, color: LEAF, rnd, closed: true, fill: LEAFF, passes: 1 }); }
     }
   }
 
@@ -837,17 +839,17 @@
     const rnd = DS.makeRng(it.seed);
     ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.tilt || 0); ctx.scale(it.s || 1, it.s || 1); // grow perpendicular to the surface
     if (it.kind === 'tuft') {
-      for (let i = -1; i <= 1; i++) D.curve(ctx, [[i * 6, 0], [i * 9, -13], [i * 15, -20]], { width: 3, color: SCN, rnd, passes: 1 });
+      for (let i = -1; i <= 1; i++) D.curve(ctx, [[i * 6, 0], [i * 9, -13], [i * 15, -20]], { width: 3, color: LEAF, rnd, passes: 1 });
     } else if (it.kind === 'stalk') {
-      D.curve(ctx, [[0, 0], [-2, -18], [1, -32]], { width: 3, color: SCN, rnd, passes: 1 }); D.circle(ctx, 1, -36, 5, { width: 3, color: SCN, rnd, fill: D.COL.paper });
+      D.curve(ctx, [[0, 0], [-2, -18], [1, -32]], { width: 3, color: LEAF, rnd, passes: 1 }); D.circle(ctx, 1, -36, 5, { width: 3, color: LEAF, rnd, fill: D.COL.accent });
     } else if (it.kind === 'shrub') {
       const pts = [], N = 14; for (let i = 0; i <= N; i++) { const a = Math.PI + (i / N) * Math.PI, rr = 19 + Math.sin(i * 1.7) * 5; pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.7]); }
-      pts.push([21, 0]); pts.push([-21, 0]); D.strokePts(ctx, pts, { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+      pts.push([21, 0]); pts.push([-21, 0]); D.strokePts(ctx, pts, { width: 4, color: LEAF, rnd, closed: true, fill: LEAFF, passes: 1 });
     } else if (it.kind === 'sprout') {
-      D.line(ctx, 0, 0, 0, -22, { width: 4, color: SCN, rnd, passes: 1 }); D.strokePts(ctx, [[-10, -15], [0, -26], [10, -15]], { width: 3, color: SCN, rnd, fill: D.COL.paper, passes: 1 });
+      D.line(ctx, 0, 0, 0, -22, { width: 4, color: LEAF, rnd, passes: 1 }); D.strokePts(ctx, [[-10, -15], [0, -26], [10, -15]], { width: 3, color: LEAF, rnd, fill: LEAFF, passes: 1 });
     } else { // sapling: a little tree
-      D.strokePts(ctx, [[-6, 0], [-4, -34], [4, -34], [6, 0]], { width: 4, color: SCN, rnd, fill: D.COL.paper, passes: 1 });
-      for (const b of [[-16, -44, 18], [14, -50, 20], [0, -62, 22]]) D.circle(ctx, b[0], b[1], b[2], { width: 4, color: SCN, rnd, fill: D.COL.paper, wob: 2 });
+      D.strokePts(ctx, [[-6, 0], [-4, -34], [4, -34], [6, 0]], { width: 4, color: D.mix(D.COL.leaf, D.COL.ink, 0.3), rnd, fill: D.COL.mWood, passes: 1 });
+      for (const b of [[-16, -44, 18], [14, -50, 20], [0, -62, 22]]) D.circle(ctx, b[0], b[1], b[2], { width: 4, color: LEAF, rnd, fill: LEAFF, wob: 2 });
     }
     ctx.restore();
   }
@@ -877,11 +879,11 @@
     const rnd = DS.makeRng(it.seed), x = it.x, h = it.botY - it.topY, side = it.side || 1, n = Math.max(4, Math.round(h / 42));
     const pts = [];
     for (let i = 0; i <= n; i++) { const t = i / n; pts.push([x + Math.sin(t * 7 + side) * 7 * side, it.botY - t * h]); }
-    D.strokePts(ctx, pts, { width: 2.5, color: SCN, rnd, passes: 1 });
+    D.strokePts(ctx, pts, { width: 2.5, color: LEAF, rnd, passes: 1 });
     for (let i = 1; i < n; i++) {
       if (i % 2) continue;
       const t = i / n, lx = x + Math.sin(t * 7 + side) * 7 * side, ly = it.botY - t * h, d2 = (i % 4 === 0 ? 1 : -1) * side;
-      D.strokePts(ctx, [[lx, ly], [lx + d2 * 11, ly - 5], [lx + d2 * 7, ly + 5]], { width: 2.4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+      D.strokePts(ctx, [[lx, ly], [lx + d2 * 11, ly - 5], [lx + d2 * 7, ly + 5]], { width: 2.4, color: LEAF, rnd, closed: true, fill: LEAFF, passes: 1 });
     }
   }
   // a low parapet railing following a flat top: a rail line on short posts
