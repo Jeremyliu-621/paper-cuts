@@ -502,7 +502,18 @@
       if (!this.isCustom(id)) return null;
       if (!data.stages) data.stages = {};
       if (!data.stages[id]) data.stages[id] = this.stageFromDraft(draft, name);
-      else if (name) data.stages[id].name = name;
+      else {
+        if (name) data.stages[id].name = name;
+        if (draft && typeof draft === 'object') {
+          const next = this.stageFromDraft(draft, name || data.stages[id].name);
+          data.stages[id].platforms = next.platforms;
+          data.stages[id].portals = next.portals;
+          data.stages[id].spawns = next.spawns;
+          data.stages[id].decor = next.decor;
+          data.stages[id].bg = next.bg;
+          data.stages[id].bounds = next.bounds;
+        }
+      }
       return data.stages[id];
     },
     has(id) { return !!this.defs[id] || this.isCustom(id); },

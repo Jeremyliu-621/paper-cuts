@@ -358,6 +358,57 @@ function visualObservationLabel(observation) {
   return 'error'
 }
 
+function candidateQueueState(candidate, observation) {
+  if (candidate.status === 'confirmed' && candidate.answer?.classifier === 'vlm') return 'passed'
+  if (candidate.status === 'confirmed') return 'resolved'
+  if (candidate.status === 'decor' || candidate.status === 'ignored') return 'resolved'
+  if (candidate.status !== 'needs_answer') return candidate.status || 'queued'
+  if (!observation || observation.captureVersion !== candidate.captureVersion) return 'queued'
+  if (observation.status === 'pending') return 'running'
+  if (observation.status === 'ready') return 'needs check'
+  if (observation.status === 'missing_key' || observation.status === 'error') return 'needs manual'
+  return observation.status || 'queued'
+}
+
+function shouldShowManualChoices(candidate, observation) {
+  if (!candidate || candidate.status !== 'needs_answer') return false
+  if (!observation || observation.captureVersion !== candidate.captureVersion) return false
+  return observation.status === 'ready'
+    || observation.status === 'error'
+    || observation.status === 'missing_key'
+}
+
+function buildVlmQueueItems(semanticDraft, observation) {
+  const candidates = semanticDraft?.candidates || []
+  const items = candidates.map((candidate, index) => ({
+    id: candidate.candidateId,
+    label: `Doodle ${index + 1}`,
+    extractor: candidate.extractor,
+    state: candidateQueueState(candidate, observation),
+    answer: candidate.answer,
+  }))
+  if (!items.length && observation) {
+    items.push({
+      id: observation.jobId || 'vision',
+      label: 'Vision pass',
+      extractor: 'capture',
+      state: visualObservationLabel(observation),
+      answer: null,
+    })
+  }
+  return items
+}
+
+function vlmQueueSummary(items, observation) {
+  const running = items.filter((item) => item.state === 'running').length
+  const blocked = items.filter((item) => item.state === 'needs manual' || item.state === 'needs check').length
+  const passed = items.filter((item) => item.state === 'passed').length
+  if (running) return `${running} running`
+  if (blocked) return `${blocked} needs check`
+  if (passed) return `${passed} passed`
+  return visualObservationLabel(observation)
+}
+
 function syncStatusLabel(status) {
   const labels = {
     idle: 'joining',
@@ -530,7 +581,7 @@ function CanvasStageReferenceLayer({ stageReference }) {
   )
 }
 
-function StageEditLayer({ stageReference, selectedItem, onSelectItem, onCommitEdit }) {
+function StageEditLayer({ stageReference, selectedItem, active, onSelectItem, onCommitEdit }) {
   const svgRef = useRef(null)
   const dragRef = useRef(null)
   const stage = useMemo(() => stageFromReference(stageReference), [stageReference])
@@ -633,7 +684,7 @@ function StageEditLayer({ stageReference, selectedItem, onSelectItem, onCommitEd
   return (
     <svg
       ref={svgRef}
-      className="stage-edit-layer"
+      className={`stage-edit-layer${active ? ' active' : ''}`}
       viewBox={`${GAME_FRAME.x} ${GAME_FRAME.y} ${GAME_FRAME.w} ${GAME_FRAME.h}`}
       width={GAME_FRAME.w}
       height={GAME_FRAME.h}
@@ -755,10 +806,10 @@ function SemanticPanel({
   const question = selected?.question
   const choices = compactChoices(question?.choices || [])
   const pendingCount = pending.length
-  const needsManualFallback = visualObservation?.status === 'error' || visualObservation?.status === 'missing_key'
+  const showManualChoices = shouldShowManualChoices(selected, visualObservation)
 
   return (
-    <section className="semantic-panel" aria-label="Manual doodle choices">
+    <section className={`semantic-panel ${showManualChoices ? 'manual-ready' : 'vlm-first'}`} aria-label="Doodle classification">
       <div className="semantic-candidate-strip">
         {candidates.map((candidate, index) => (
           <button
@@ -775,17 +826,17 @@ function SemanticPanel({
         <div className="semantic-question">
           <div className="semantic-question-head">
             <div>
-              <span>{pendingCount ? `Choose type · ${pendingCount} left` : 'Doodle type'}</span>
-              <strong>{selected.status === 'needs_answer' ? question?.prompt || 'What should this doodle become?' : selected.answer?.choiceId || selected.status}</strong>
+              <span>{pendingCount ? `Vision queue · ${pendingCount} waiting` : 'Doodle type'}</span>
+              <strong>{selected.status === 'needs_answer' ? 'Vision is checking this doodle' : selected.answer?.choiceId || selected.status}</strong>
             </div>
             <span>{selected.extractor}</span>
           </div>
-          {needsManualFallback && selected.status === 'needs_answer' ? (
+          {showManualChoices ? (
             <p className="semantic-answer-state">
               Vision could not decide. Pick a type below.
             </p>
           ) : null}
-          {selected.status === 'needs_answer' ? (
+          {showManualChoices ? (
             <div className="semantic-choice-grid">
               {choices.map((choice) => (
                 <button
@@ -797,6 +848,12 @@ function SemanticPanel({
                 </button>
               ))}
             </div>
+          ) : selected.status === 'needs_answer' ? (
+            <p className="semantic-answer-state">
+              {visualObservation?.status === 'pending'
+                ? 'Waiting for VLM before asking you.'
+                : 'Open the VLM queue for pass details.'}
+            </p>
           ) : (
             <p className="semantic-answer-state">
               {selected.answer?.role === 'platform' ? `Confirmed: ${selected.answer.behavior}` : selected.status}
@@ -804,6 +861,29 @@ function SemanticPanel({
           )}
           {error ? <p className="semantic-error">{error}</p> : null}
         </div>
+      ) : null}
+    </section>
+  )
+}
+
+function VlmQueuePanel({ items, observation }) {
+  return (
+    <section className="vlm-queue-panel" aria-label="VLM pass queue">
+      <div className="vlm-queue-head">
+        <strong>VLM Queue</strong>
+        <span>{visualObservationLabel(observation)}</span>
+      </div>
+      <ol>
+        {items.map((item) => (
+          <li key={item.id} className={`vlm-queue-item state-${item.state.replace(/\s+/g, '-')}`}>
+            <span>{item.label}</span>
+            <strong>{item.state}</strong>
+            <em>{item.answer?.behavior || item.extractor}</em>
+          </li>
+        ))}
+      </ol>
+      {observation?.errors?.length ? (
+        <p>{observation.errors.slice(0, 2).join(' · ')}</p>
       ) : null}
     </section>
   )
@@ -850,11 +930,14 @@ function DesktopSelectionPanel({ selection, currentRoomId, onSwitch }) {
 function EditorToolbar({
   tool,
   selectedItem,
+  queueLabel,
+  queueOpen,
   onSetTool,
   onAddPlatform,
   onAddPortal,
   onDelete,
   onNudge,
+  onToggleQueue,
 }) {
   return (
     <div className="magic-toolbar" aria-label="Level editor tools">
@@ -874,6 +957,14 @@ function EditorToolbar({
           title="Move and resize level objects"
         >
           Edit
+        </button>
+        <button
+          type="button"
+          className={queueOpen ? 'active' : ''}
+          onClick={onToggleQueue}
+          title="Show VLM pass queue"
+        >
+          VLM {queueLabel}
         </button>
       </div>
       <div className="magic-toolbar-group" role="group" aria-label="Add objects">
@@ -898,6 +989,22 @@ function EditorToolbar({
         <button type="button" onClick={() => onNudge(0, 24)} disabled={!selectedItem} title="Move down">Down</button>
       </div>
     </div>
+  )
+}
+
+function EditorSheetHeader({ roomName, status, open, onToggle }) {
+  return (
+    <button
+      className="editor-sheet-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls="editor-chrome-scroll"
+    >
+      <span>{open ? 'Hide tools' : 'Show tools'}</span>
+      <strong>{roomName || 'Drawing on level'}</strong>
+      <em>{status}</em>
+    </button>
   )
 }
 
@@ -1055,6 +1162,21 @@ export default function App() {
   const [desktopSelection, setDesktopSelection] = useState(null)
   const [activeTool, setActiveTool] = useState('draw')
   const [selectedStageItem, setSelectedStageItem] = useState(null)
+  const [sheetOpen, setSheetOpen] = useState(() => window.matchMedia?.('(min-width: 1180px)').matches || false)
+  const [queueOpen, setQueueOpen] = useState(false)
+
+  const vlmQueueItems = useMemo(
+    () => buildVlmQueueItems(semanticDraft, visualObservation),
+    [semanticDraft, visualObservation],
+  )
+  const vlmQueueLabel = useMemo(
+    () => vlmQueueSummary(vlmQueueItems, visualObservation),
+    [vlmQueueItems, visualObservation],
+  )
+  const manualFallbackActive = useMemo(
+    () => (semanticDraft?.candidates || []).some((candidate) => shouldShowManualChoices(candidate, visualObservation)),
+    [semanticDraft, visualObservation],
+  )
 
   const updateLocalStageReference = useCallback((operation) => {
     setSelectedRoom((current) => {
@@ -1134,17 +1256,14 @@ export default function App() {
         <>
           <CanvasStageReferenceLayer stageReference={selectedRoom?.stageReference} />
           <SemanticCandidateLayer semanticDraft={semanticDraft} selectedCandidateId={selectedCandidateId} />
-        </>
-      ),
-      InFrontOfTheCanvas: () => (
-        activeTool === 'edit' ? (
           <StageEditLayer
             stageReference={selectedRoom?.stageReference}
             selectedItem={selectedStageItem}
+            active={activeTool === 'edit'}
             onSelectItem={setSelectedStageItem}
             onCommitEdit={sendStageEdit}
           />
-        ) : null
+        </>
       ),
     }),
     [activeTool, semanticDraft, selectedCandidateId, selectedRoom?.stageReference, selectedStageItem, sendStageEdit],
@@ -1200,6 +1319,10 @@ export default function App() {
       return selected?.candidateId || candidates[0]?.candidateId || null
     })
   }, [semanticDraft])
+
+  useEffect(() => {
+    if (manualFallbackActive || queueOpen || desktopSelection) setSheetOpen(true)
+  }, [desktopSelection, manualFallbackActive, queueOpen])
 
   useEffect(() => {
     let cancelled = false
@@ -1607,19 +1730,34 @@ export default function App() {
       <EditorToolbar
         tool={activeTool}
         selectedItem={selectedStageItem}
+        queueLabel={vlmQueueLabel}
+        queueOpen={queueOpen}
         onSetTool={setEditorTool}
         onAddPlatform={addStagePlatform}
         onAddPortal={addStagePortal}
         onDelete={deleteSelectedStageItem}
         onNudge={nudgeSelectedStageItem}
+        onToggleQueue={() => {
+          setQueueOpen((current) => !current)
+          setSheetOpen(true)
+        }}
       />
-      <aside className="editor-chrome" aria-label="Magic Board editor tools">
-        <div className="editor-chrome-scroll">
+      <aside className={`editor-chrome ${sheetOpen ? 'open' : 'collapsed'} ${queueOpen ? 'queue-open' : ''}`} aria-label="Magic Board editor tools">
+        <EditorSheetHeader
+          roomName={selectedRoom?.worldName || selectedRoom?.worldId || roomId}
+          status={`${syncStatusLabel(status)} · ${vlmQueueLabel}`}
+          open={sheetOpen}
+          onToggle={() => setSheetOpen((current) => !current)}
+        />
+        <div id="editor-chrome-scroll" className="editor-chrome-scroll">
           <DesktopSelectionPanel
             selection={desktopSelection}
             currentRoomId={roomId}
             onSwitch={handleSwitchToSelection}
           />
+          {queueOpen ? (
+            <VlmQueuePanel items={vlmQueueItems} observation={visualObservation} />
+          ) : null}
           <SemanticPanel
             semanticDraft={semanticDraft}
             selectedCandidateId={selectedCandidateId}
