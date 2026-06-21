@@ -7,6 +7,12 @@
   const D = DS.draw;
   const ink = () => D.COL.ink;
 
+  // Barely-there material tints — mostly paper with a whisper of hue, so the page
+  // still reads as charcoal-on-cream but platforms aren't dead flat. Fill only; the
+  // inked outlines stay pure ink. Keep the mix amounts tiny.
+  const TINT_EARTH = D.mix(D.COL.paper, '#7a5230', 0.10); // platform body — a touch brown (below the line)
+  const TINT_BRICK = D.mix(D.COL.paper, '#a8432c', 0.12); // brick / stone — a touch red
+
   // ---- platforms -----------------------------------------------------------
   // dispatch on p.kind; default is ground (solid) / float (pass-through). A stable
   // per-platform seed (set by the Game) keeps hand-drawn jitter from shimmering on
@@ -83,7 +89,9 @@
     };
     // soft cutout shadow + cream body
     ctx.save(); ctx.translate(7, 10); ctx.globalAlpha = 0.1; ribbon(); ctx.fillStyle = D.COL.ink; ctx.fill(); ctx.restore();
-    ribbon(); ctx.fillStyle = D.COL.paper; ctx.fill();
+    // body fill carries a whisper of colour: brick→red, others→earthy brown (crystal/bouncy stay neutral)
+    const bodyFill = style === 'stone' ? TINT_BRICK : (style === 'crystal' || style === 'bouncy') ? D.COL.paper : TINT_EARTH;
+    ribbon(); ctx.fillStyle = bodyFill; ctx.fill();
     if (style === 'crystal' || style === 'bouncy') { ribbon(); ctx.globalAlpha = 0.08; ctx.fillStyle = edge; ctx.fill(); ctx.globalAlpha = 1; }
     // chunky edges + rounded caps
     D.strokePts(ctx, top, { width: 6, color: edge, rnd, passes: 1, jitter: 0.25 });
@@ -146,7 +154,7 @@
 
   function groundPlat(ctx, p, rnd) {
     const r = 20;
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: TINT_EARTH });
     D.wavy(ctx, p.x + r, p.x + p.w - r, p.y + 16, { amp: 4, wavelen: 30, width: 4, color: D.COL.ink, rnd, passes: 1 });
     ctx.save();
     ctx.setLineDash([3, 16]); ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.strokeStyle = D.COL.ink; ctx.globalAlpha = 0.7;
@@ -163,13 +171,13 @@
 
   function floatPlat(ctx, p, rnd) {
     const r = Math.min(p.h / 2, 16);
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: TINT_EARTH });
     D.wavy(ctx, p.x + r, p.x + p.w - r, p.y + 12, { amp: 3, wavelen: 30, width: 4, color: D.COL.ink, rnd, passes: 1 });
   }
 
   function woodPlat(ctx, p, rnd) {
     const r = Math.min(p.h / 2, 9);
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 5, color: D.COL.ink, rnd, fill: TINT_EARTH });
     const boards = Math.max(2, Math.round(p.w / 95));
     for (let i = 1; i < boards; i++) {
       const x = p.x + (p.w * i) / boards;
@@ -188,7 +196,7 @@
 
   function stonePlat(ctx, p, rnd) {
     const r = Math.min(p.h / 2, 12);
-    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: D.COL.paper });
+    D.roundedRect(ctx, p.x, p.y, p.w, p.h, r, { width: 6, color: D.COL.ink, rnd, fill: TINT_BRICK });
     // offset brick courses
     const rows = Math.max(1, Math.round(p.h / 34));
     ctx.globalAlpha = 0.7;
@@ -557,6 +565,8 @@
   // geometry+density key, so it regrows the instant a layout changes and costs no derive time when
   // nothing changed. Purely visual: no collision, zero gameplay impact. Density 0..2.
   const SCN = BG_INK;                 // every dressing mark is the background gray
+  const SCN_LEAF = D.mix(SCN, '#3f7a2e', 0.32);          // foliage on top — the gray nudged a touch green (above the line)
+  const LEAF_FILL = D.mix(D.COL.paper, '#3f7a2e', 0.12); // faint green fill for plant blobs
   const GAP_MIN = 40, PILLAR_MAX = 700; // a gap beyond PILLAR_MAX reads as floating → island, not pillar
   const TOP_KINDS = ['tuft', 'stalk', 'shrub', 'sprout'];
   const TOP_KINDS_BIG = ['tuft', 'stalk', 'shrub', 'sprout', 'sapling'];
@@ -837,17 +847,17 @@
     const rnd = DS.makeRng(it.seed);
     ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.tilt || 0); ctx.scale(it.s || 1, it.s || 1); // grow perpendicular to the surface
     if (it.kind === 'tuft') {
-      for (let i = -1; i <= 1; i++) D.curve(ctx, [[i * 6, 0], [i * 9, -13], [i * 15, -20]], { width: 3, color: SCN, rnd, passes: 1 });
+      for (let i = -1; i <= 1; i++) D.curve(ctx, [[i * 6, 0], [i * 9, -13], [i * 15, -20]], { width: 3, color: SCN_LEAF, rnd, passes: 1 });
     } else if (it.kind === 'stalk') {
-      D.curve(ctx, [[0, 0], [-2, -18], [1, -32]], { width: 3, color: SCN, rnd, passes: 1 }); D.circle(ctx, 1, -36, 5, { width: 3, color: SCN, rnd, fill: D.COL.paper });
+      D.curve(ctx, [[0, 0], [-2, -18], [1, -32]], { width: 3, color: SCN_LEAF, rnd, passes: 1 }); D.circle(ctx, 1, -36, 5, { width: 3, color: SCN_LEAF, rnd, fill: LEAF_FILL });
     } else if (it.kind === 'shrub') {
       const pts = [], N = 14; for (let i = 0; i <= N; i++) { const a = Math.PI + (i / N) * Math.PI, rr = 19 + Math.sin(i * 1.7) * 5; pts.push([Math.cos(a) * rr, Math.sin(a) * rr * 0.7]); }
-      pts.push([21, 0]); pts.push([-21, 0]); D.strokePts(ctx, pts, { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+      pts.push([21, 0]); pts.push([-21, 0]); D.strokePts(ctx, pts, { width: 4, color: SCN_LEAF, rnd, closed: true, fill: LEAF_FILL, passes: 1 });
     } else if (it.kind === 'sprout') {
-      D.line(ctx, 0, 0, 0, -22, { width: 4, color: SCN, rnd, passes: 1 }); D.strokePts(ctx, [[-10, -15], [0, -26], [10, -15]], { width: 3, color: SCN, rnd, fill: D.COL.paper, passes: 1 });
+      D.line(ctx, 0, 0, 0, -22, { width: 4, color: SCN_LEAF, rnd, passes: 1 }); D.strokePts(ctx, [[-10, -15], [0, -26], [10, -15]], { width: 3, color: SCN_LEAF, rnd, fill: LEAF_FILL, passes: 1 });
     } else { // sapling: a little tree
-      D.strokePts(ctx, [[-6, 0], [-4, -34], [4, -34], [6, 0]], { width: 4, color: SCN, rnd, fill: D.COL.paper, passes: 1 });
-      for (const b of [[-16, -44, 18], [14, -50, 20], [0, -62, 22]]) D.circle(ctx, b[0], b[1], b[2], { width: 4, color: SCN, rnd, fill: D.COL.paper, wob: 2 });
+      D.strokePts(ctx, [[-6, 0], [-4, -34], [4, -34], [6, 0]], { width: 4, color: SCN_LEAF, rnd, fill: LEAF_FILL, passes: 1 });
+      for (const b of [[-16, -44, 18], [14, -50, 20], [0, -62, 22]]) D.circle(ctx, b[0], b[1], b[2], { width: 4, color: SCN_LEAF, rnd, fill: LEAF_FILL, wob: 2 });
     }
     ctx.restore();
   }
