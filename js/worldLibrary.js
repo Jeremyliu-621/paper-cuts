@@ -47,6 +47,7 @@
       version: Number.isFinite(saved.version) ? saved.version : 0,
       capture: saved.capture && typeof saved.capture === 'object' ? saved.capture : null,
       projection: saved.projection && typeof saved.projection === 'object' ? saved.projection : null,
+      semanticDraft: saved.semanticDraft && typeof saved.semanticDraft === 'object' ? saved.semanticDraft : null,
       backendUpdatedAt: saved.backendUpdatedAt || null,
       savedAt: saved.savedAt || null,
     };
@@ -164,16 +165,24 @@
         version: Number.isFinite(roomCapture.version) ? roomCapture.version : 0,
         capture: roomCapture.capture || null,
         projection: roomCapture.projection || null,
+        semanticDraft: roomCapture.semanticDraft || null,
         backendUpdatedAt: roomCapture.updatedAt || null,
         savedAt: nowIso(),
       },
     });
   }
 
+  function localServiceUrl(port) {
+    const protocol = global.location.protocol === 'https:' ? 'https:' : 'http:';
+    const host = global.location.hostname;
+    if (!host || global.location.protocol === 'file:') return protocol + '//localhost:' + port + '/';
+    return protocol + '//' + host + ':' + port + '/';
+  }
+
   function drawClientUrl(world) {
     const params = new URLSearchParams(global.location.search);
-    const base = params.get('drawClient') || params.get('draw') || 'http://localhost:5173/';
-    const backend = params.get('backend') || 'http://localhost:8000';
+    const base = params.get('drawClient') || params.get('draw') || localServiceUrl(5173);
+    const backend = params.get('backend') || localServiceUrl(8000).replace(/\/$/, '');
     let url;
     try { url = new URL(base, global.location.href); }
     catch (_error) { url = new URL('http://localhost:5173/'); }

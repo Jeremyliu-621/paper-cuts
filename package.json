@@ -4,7 +4,9 @@
   "private": true,
   "description": "Lobby + phone-controller relay for Doodle Smash. Serves the game, the mobile controller page, a QR endpoint, and a WebSocket relay so phones can join a lobby and drive fighters. The game itself stays zero-build and still runs from file:// for solo/keyboard play.",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tests/magicBoardGame.test.mjs",
+    "test:browser": "node tests/desktopSmoke.test.mjs"
   },
   "engines": {
     "node": ">=18"

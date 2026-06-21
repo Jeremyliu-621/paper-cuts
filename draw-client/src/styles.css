@@ -146,8 +146,191 @@ body {
   vector-effect: non-scaling-stroke;
 }
 
+.semantic-candidate-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.semantic-candidate {
+  fill: rgba(63, 143, 134, 0.12);
+  stroke: #3f8f86;
+  stroke-width: 8px;
+  stroke-dasharray: 22 16;
+  vector-effect: non-scaling-stroke;
+}
+
+.semantic-candidate-confirmed {
+  fill: rgba(46, 139, 87, 0.18);
+  stroke: #2e8b57;
+  stroke-dasharray: none;
+}
+
+.semantic-candidate-ignored {
+  fill: rgba(107, 98, 89, 0.08);
+  stroke: #6b6259;
+}
+
+.semantic-candidate-decor {
+  fill: rgba(154, 108, 176, 0.12);
+  stroke: #7c4e92;
+}
+
+.semantic-candidate-selected {
+  stroke: #d4663f;
+  stroke-width: 11px;
+}
+
+.semantic-candidate-label {
+  fill: #2f2a26;
+  paint-order: stroke;
+  stroke: #fffaf0;
+  stroke-width: 7px;
+  font-size: 34px;
+  font-weight: 850;
+  pointer-events: none;
+}
+
 .tl-shapes {
   background: transparent;
+}
+
+.semantic-panel {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  z-index: 24;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  width: min(760px, calc(100vw - 24px));
+  padding: 10px;
+  border: 1px solid rgba(31, 37, 40, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.94);
+  box-shadow: 0 10px 26px rgba(31, 37, 40, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.semantic-candidate-strip {
+  display: grid;
+  grid-auto-rows: 32px;
+  gap: 6px;
+  max-height: 214px;
+  overflow: auto;
+}
+
+.semantic-candidate-pill,
+.semantic-choice-grid button,
+.semantic-command button {
+  border: 1px solid rgba(47, 42, 38, 0.28);
+  border-radius: 7px;
+  background: #fffaf0;
+  color: #1f2528;
+  font: inherit;
+  font-weight: 780;
+}
+
+.semantic-candidate-pill {
+  width: 34px;
+  min-height: 32px;
+}
+
+.semantic-candidate-pill.active {
+  border-color: #d4663f;
+  background: #f7e6d8;
+}
+
+.semantic-candidate-pill.status-confirmed {
+  color: #1f5d3d;
+}
+
+.semantic-candidate-pill.status-ignored {
+  color: #6b6259;
+}
+
+.semantic-question {
+  min-width: 0;
+}
+
+.semantic-question-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.semantic-question-head strong {
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.semantic-question-head span {
+  color: rgba(31, 37, 40, 0.62);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.semantic-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.semantic-choice-grid button,
+.semantic-command button {
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.05;
+}
+
+.semantic-choice-grid button:hover,
+.semantic-command button:hover,
+.semantic-candidate-pill:hover {
+  border-color: #2f2a26;
+  background: #f7f4ec;
+}
+
+.semantic-command {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.semantic-command input {
+  min-width: 0;
+  height: 34px;
+  padding: 6px 8px;
+  border: 1px solid rgba(47, 42, 38, 0.22);
+  border-radius: 7px;
+  background: #fffdf7;
+  color: #1f2528;
+  font: inherit;
+  font-size: 13px;
+}
+
+.semantic-answer-state,
+.semantic-error {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.semantic-answer-state {
+  color: #1f5d3d;
+}
+
+.semantic-error {
+  margin-top: 6px;
+  color: #a33a2a;
 }
 
 .debug-panel {
@@ -227,6 +410,23 @@ body {
 .status-error,
 .status-disconnected {
   background: #ba4a38;
+}
+
+@media (max-width: 720px) {
+  .semantic-panel {
+    grid-template-columns: 1fr;
+    right: max(12px, env(safe-area-inset-right));
+  }
+
+  .semantic-candidate-strip {
+    display: flex;
+    max-height: none;
+    overflow-x: auto;
+  }
+
+  .semantic-choice-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .tl-container {

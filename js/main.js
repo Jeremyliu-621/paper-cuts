@@ -45,6 +45,7 @@
     mode = 'levelPreview';
     setActiveTab('');
     setPreviewSaveState('Save', false);
+    setPreviewApplyState('Apply Platforms', false);
     DS.LevelPreview.enter(world, {
       onActivity(activeWorld, activity) {
         if (!activeWorld || !worldLibrary) return;
@@ -66,6 +67,21 @@
     button.disabled = !!disabled;
   }
 
+  function setPreviewApplyState(label, disabled) {
+    const button = document.getElementById('level-preview-apply');
+    if (!button) return;
+    button.textContent = label;
+    button.disabled = !!disabled;
+  }
+
+  function openActiveDrawClient() {
+    if (!DS.LevelPreview || !worldLibrary) return;
+    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
+    if (!activeWorld) return;
+    const url = worldLibrary.drawClientUrl(activeWorld);
+    global.open(url, '_blank', 'noopener');
+  }
+
   async function saveLevelPreviewCapture() {
     if (!DS.LevelPreview || !worldLibrary) return;
     const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
@@ -85,6 +101,53 @@
     } catch (error) {
       console.warn('level preview save failed', error);
       setPreviewSaveState('Save failed', false);
+    }
+  }
+
+  async function applyLevelPreviewSemanticDraft() {
+    if (!DS.LevelPreview || !DS.MagicBoardGame || !worldLibrary) return;
+    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
+    if (!activeWorld) return;
+    setPreviewApplyState('Applying...', true);
+    try {
+      let draft = DS.LevelPreview.state.semanticDraft;
+      if (!draft) {
+        const room = await DS.LevelPreview.saveCapture();
+        draft = room.semanticDraft;
+      }
+      const mapId = activeWorld.mapId || 'meadow';
+      const patch = DS.MagicBoardGame.buildPatchFromSemanticDraft(draft, {
+        worldId: activeWorld.id,
+        roomId: activeWorld.roomId || activeWorld.id,
+        mapId,
+      });
+      if (!patch.operations.length) throw new Error('Confirm at least one platform first.');
+      const result = DS.MagicBoardGame.applyPatch(patch, {
+        rebuild() {
+          game.mapId = mapId;
+          game.rebuild();
+        },
+      });
+      if (!result.ok) throw new Error(result.errors.join('; '));
+
+      const stage = DS.Maps.stageFor(DS.Store.data, mapId);
+      const platforms = patch.operations
+        .filter((operation) => operation.type === 'add_platform')
+        .map((operation) => operation.platform);
+      const spawns = (stage.spawns && stage.spawns.length >= 2 ? stage.spawns : [{ x: 660, y: 780 }, { x: 1260, y: 780 }]).slice(0, 2);
+      const characters = (DS.Store.data.roster || ['Sprout', 'Acorn']).slice(0, 2);
+      const updated = worldLibrary.updateWorld(activeWorld.id, {
+        lastEditedAt: new Date().toISOString(),
+        mapId,
+        draft: { platforms, spawns, characters },
+      });
+      if (updated) DS.LevelPreview.state.world = updated;
+      setPreviewApplyState('Applied', true);
+      window.setTimeout(() => setPreviewApplyState('Apply Platforms', false), 1400);
+    } catch (error) {
+      console.warn('semantic apply failed', error);
+      setPreviewApplyState(error && error.message ? error.message : 'Apply failed', false);
+      window.setTimeout(() => setPreviewApplyState('Apply Platforms', false), 2200);
     }
   }
 
@@ -558,6 +621,14 @@
   document.getElementById('btn-menu').onclick = () => { if (DS.Audio) DS.Audio.play('ui_confirm'); openMenu(); };
   document.getElementById('level-preview-library').onclick = () => {
     openHomeLibrary();
+  };
+  document.getElementById('level-preview-draw').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    openActiveDrawClient();
+  };
+  document.getElementById('level-preview-apply').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    applyLevelPreviewSemanticDraft();
   };
   document.getElementById('level-preview-save').onclick = () => {
     if (DS.Audio) DS.Audio.play('ui_confirm');

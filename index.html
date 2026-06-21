@@ -72,6 +72,8 @@
             <span id="level-preview-status">idle · v0</span>
           </div>
           <div class="level-preview-actions">
+            <button id="level-preview-draw" class="level-preview-button secondary">Open Draw</button>
+            <button id="level-preview-apply" class="level-preview-button">Apply Platforms</button>
             <button id="level-preview-save" class="level-preview-button">Save</button>
             <button id="level-preview-library" class="level-preview-button secondary">Library</button>
           </div>
@@ -169,7 +171,7 @@
   <script>
     (function () {
       var files = ['rng', 'draw', 'stageReferenceData', 'data', 'character', 'skin', 'effects', 'audio', 'input', 'physics',
-        'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'createOverlay', 'levelPreview', 'worldLibrary', 'main'];
+        'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'createOverlay', 'levelPreview', 'worldLibrary', 'magicBoardGame', 'main'];
       var http = location.protocol === 'http:' || location.protocol === 'https:';
       var bust = http ? '?v=' + Date.now() : '';
       for (var i = 0; i < files.length; i++) {

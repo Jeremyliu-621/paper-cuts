@@ -77,6 +77,14 @@ function captureUrlForRoom(backendUrl, roomId) {
   return url.toString()
 }
 
+function clarificationUrlForRoom(backendUrl, roomId) {
+  const url = new URL(backendUrl)
+  url.pathname = `/rooms/${encodeURIComponent(roomId)}/clarifications`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
 function selectionWsUrlForBackend(backendUrl) {
   const url = new URL(backendUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -200,6 +208,24 @@ function projectionObjectCount(projection) {
   return (projection?.strokes?.length || 0) + (projection?.shapes?.length || 0) + (projection?.labels?.length || 0)
 }
 
+function semanticCandidateCount(semanticDraft) {
+  return semanticDraft?.candidates?.length || 0
+}
+
+function choiceForCommand(command) {
+  const value = command.trim().toLowerCase()
+  if (!value) return null
+  if (/\b(no|ignore|skip|remove)\b/.test(value)) return 'no_ignore'
+  if (/\b(decor|decoration|background)\b/.test(value)) return 'decor'
+  if (/\b(pass|through|one[-\s]?way|soft)\b/.test(value)) return 'pass_through'
+  if (/\b(bounce|bouncy|trampoline|spring)\b/.test(value)) return 'bouncy'
+  if (/\b(spike|spikes|damage|damaging|hurt|hazard)\b/.test(value)) return 'damaging'
+  if (/\b(icy|ice|crystal|slippery)\b/.test(value)) return 'icy'
+  if (/\b(break|breakable|box|crate)\b/.test(value)) return 'breakable'
+  if (/\b(yes|platform|solid|normal)\b/.test(value)) return 'normal'
+  return null
+}
+
 function ensureStageFrame(editor) {
   if (!editor.getShape(FRAME_SHAPE_ID)) {
     editor.createShapes([
@@ -295,6 +321,118 @@ function PlatformReferenceLayer() {
   )
 }
 
+function SemanticCandidateLayer({ semanticDraft, selectedCandidateId }) {
+  const candidates = semanticDraft?.candidates || []
+  if (!candidates.length) return null
+
+  return (
+    <svg
+      className="semantic-candidate-layer"
+      viewBox={`${GAME_FRAME.x} ${GAME_FRAME.y} ${GAME_FRAME.w} ${GAME_FRAME.h}`}
+      width={GAME_FRAME.w}
+      height={GAME_FRAME.h}
+      focusable="false"
+      aria-hidden="true"
+    >
+      {candidates.map((candidate, index) => {
+        const geometry = candidate.geometry || {}
+        const selected = candidate.candidateId === selectedCandidateId
+        const className = [
+          'semantic-candidate',
+          `semantic-candidate-${candidate.status || 'needs_answer'}`,
+          selected ? 'semantic-candidate-selected' : '',
+        ].filter(Boolean).join(' ')
+        return (
+          <g key={candidate.candidateId || `${candidate.geometryHash}-${index}`}>
+            <rect
+              className={className}
+              x={geometry.x}
+              y={geometry.y}
+              width={geometry.w}
+              height={geometry.h}
+              rx={Math.min(18, Math.max(4, (geometry.h || 20) / 3))}
+              ry={Math.min(18, Math.max(4, (geometry.h || 20) / 3))}
+            />
+            <text className="semantic-candidate-label" x={(geometry.x || 0) + 12} y={(geometry.y || 0) - 10}>
+              {index + 1}
+            </text>
+          </g>
+        )
+      })}
+    </svg>
+  )
+}
+
+function SemanticPanel({
+  semanticDraft,
+  selectedCandidateId,
+  onSelectCandidate,
+  onAnswer,
+  command,
+  onCommandChange,
+  onCommandSubmit,
+  error,
+}) {
+  const candidates = semanticDraft?.candidates || []
+  const pending = candidates.filter((candidate) => candidate.status === 'needs_answer')
+  const selected = candidates.find((candidate) => candidate.candidateId === selectedCandidateId) || pending[0] || candidates[0]
+  if (!candidates.length) return null
+  const question = selected?.question
+  const choices = question?.choices || []
+
+  return (
+    <section className="semantic-panel" aria-label="Semantic clarification">
+      <div className="semantic-candidate-strip">
+        {candidates.map((candidate, index) => (
+          <button
+            key={candidate.candidateId}
+            className={`semantic-candidate-pill ${candidate.candidateId === selected?.candidateId ? 'active' : ''} status-${candidate.status || 'needs_answer'}`}
+            type="button"
+            onClick={() => onSelectCandidate(candidate.candidateId)}
+          >
+            {index + 1}
+          </button>
+        ))}
+      </div>
+      {selected ? (
+        <div className="semantic-question">
+          <div className="semantic-question-head">
+            <strong>{selected.status === 'needs_answer' ? question?.prompt || 'Is this a platform?' : selected.answer?.choiceId || selected.status}</strong>
+            <span>{selected.extractor}</span>
+          </div>
+          {selected.status === 'needs_answer' ? (
+            <div className="semantic-choice-grid">
+              {choices.map((choice) => (
+                <button
+                  key={choice.id}
+                  type="button"
+                  onClick={() => onAnswer(selected, choice.id)}
+                >
+                  {choice.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="semantic-answer-state">
+              {selected.answer?.role === 'platform' ? `Confirmed: ${selected.answer.behavior}` : selected.status}
+            </p>
+          )}
+          <form className="semantic-command" onSubmit={onCommandSubmit}>
+            <input
+              value={command}
+              onChange={(event) => onCommandChange(event.target.value)}
+              placeholder="type: pass-through, bouncy, spikes, decor, ignore"
+              aria-label="Clarification command"
+            />
+            <button type="submit">Send</button>
+          </form>
+          {error ? <p className="semantic-error">{error}</p> : null}
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
 export default function App() {
   const backendUrl = useMemo(
     () => normalizeBackendUrl(getBackendUrl()),
@@ -309,6 +447,7 @@ export default function App() {
   const urls = useMemo(
     () => (roomId ? {
       capture: captureUrlForRoom(backendUrl, roomId),
+      clarifications: clarificationUrlForRoom(backendUrl, roomId),
       websocket: websocketUrlForRoom(backendUrl, roomId),
     } : null),
     [backendUrl, roomId],
@@ -332,14 +471,32 @@ export default function App() {
   const [roomVersion, setRoomVersion] = useState(0)
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
   const [projectionCount, setProjectionCount] = useState(0)
+  const [semanticDraft, setSemanticDraft] = useState(null)
+  const [selectedCandidateId, setSelectedCandidateId] = useState(null)
+  const [semanticCommand, setSemanticCommand] = useState('')
+  const [semanticError, setSemanticError] = useState('')
   const [error, setError] = useState('')
   const [selectionStatus, setSelectionStatus] = useState('waiting')
   const tldrawComponents = useMemo(
     () => ({
-      OnTheCanvas: PlatformReferenceLayer,
+      OnTheCanvas: () => (
+        <>
+          <PlatformReferenceLayer />
+          <SemanticCandidateLayer semanticDraft={semanticDraft} selectedCandidateId={selectedCandidateId} />
+        </>
+      ),
     }),
-    [],
+    [semanticDraft, selectedCandidateId],
   )
+
+  useEffect(() => {
+    const candidates = semanticDraft?.candidates || []
+    setSelectedCandidateId((current) => {
+      if (current && candidates.some((candidate) => candidate.candidateId === current)) return current
+      const pending = candidates.find((candidate) => candidate.status === 'needs_answer')
+      return pending?.candidateId || candidates[0]?.candidateId || null
+    })
+  }, [semanticDraft])
 
   useEffect(() => {
     let cancelled = false
@@ -428,6 +585,10 @@ export default function App() {
     setRoomVersion(0)
     setLastSyncedAt(null)
     setProjectionCount(0)
+    setSemanticDraft(null)
+    setSelectedCandidateId(null)
+    setSemanticCommand('')
+    setSemanticError('')
     localHadUserContentRef.current = false
     userInteractedRef.current = false
   }, [roomId])
@@ -456,11 +617,65 @@ export default function App() {
         type: 'canvas_capture',
         capture: document,
         projection,
+        worldId: selectedRoom?.worldId || roomId,
         clientId: clientIdRef.current,
         sentAt: new Date().toISOString(),
       }),
     )
-  }, [])
+  }, [roomId, selectedRoom?.worldId])
+
+  const sendClarificationAnswer = useCallback(async (candidate, choiceId) => {
+    if (!candidate || !choiceId || !urls) return
+    const payload = {
+      type: 'clarification_answer',
+      questionId: candidate.questionId,
+      candidateId: candidate.candidateId,
+      choiceId,
+      captureVersion: candidate.captureVersion,
+      sourceIds: candidate.sourceIds,
+      geometryHash: candidate.geometryHash,
+      worldId: selectedRoom?.worldId || roomId,
+      clientId: clientIdRef.current,
+    }
+    setSemanticError('')
+    const socket = socketRef.current
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(payload))
+      return
+    }
+    try {
+      const response = await fetch(urls.clarifications, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.detail || `Clarification failed: ${response.status}`)
+      }
+      setSemanticDraft(await response.json())
+    } catch (requestError) {
+      setSemanticError(requestError.message || 'Clarification failed.')
+    }
+  }, [roomId, selectedRoom?.worldId, urls])
+
+  const submitSemanticCommand = useCallback((event) => {
+    event.preventDefault()
+    const choiceId = choiceForCommand(semanticCommand)
+    const candidates = semanticDraft?.candidates || []
+    const selected = candidates.find((candidate) => candidate.candidateId === selectedCandidateId)
+      || candidates.find((candidate) => candidate.status === 'needs_answer')
+    if (!choiceId) {
+      setSemanticError('Use a supported command.')
+      return
+    }
+    if (!selected || selected.status !== 'needs_answer') {
+      setSemanticError('No pending object selected.')
+      return
+    }
+    setSemanticCommand('')
+    sendClarificationAnswer(selected, choiceId)
+  }, [semanticCommand, semanticDraft, selectedCandidateId, sendClarificationAnswer])
 
   const scheduleCaptureSend = useCallback(() => {
     if (loadingCaptureRef.current) return
@@ -498,12 +713,19 @@ export default function App() {
         setStatus('connected')
         setBackendVersion(message.backendVersion || 'unknown')
         setRoomVersion(message.version ?? 0)
+        setSemanticDraft(message.semanticDraft || null)
       } else if (message.type === 'projection_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
         setLastSyncedAt(message.updatedAt || new Date().toISOString())
+        setSemanticDraft(message.semanticDraft || null)
+      } else if (message.type === 'semantic_draft_updated') {
+        setStatus('connected')
+        setRoomVersion(message.version ?? 0)
+        setSemanticDraft(message.semanticDraft || null)
       } else if (message.type === 'error') {
         setError(message.message || 'Backend rejected a message.')
+        setSemanticError(message.message || 'Backend rejected a message.')
       }
     })
 
@@ -539,6 +761,7 @@ export default function App() {
           const room = await response.json()
           if (!mountedRef.current || mountIdRef.current !== mountId) return
           setRoomVersion(room.version ?? 0)
+          setSemanticDraft(room.semanticDraft || null)
           localHadUserContentRef.current = projectionObjectCount(room.projection) > 0
 
           if (room.capture) {
@@ -609,6 +832,16 @@ export default function App() {
       onKeyDownCapture={() => { userInteractedRef.current = true }}
     >
       <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} />
+      <SemanticPanel
+        semanticDraft={semanticDraft}
+        selectedCandidateId={selectedCandidateId}
+        onSelectCandidate={setSelectedCandidateId}
+        onAnswer={sendClarificationAnswer}
+        command={semanticCommand}
+        onCommandChange={setSemanticCommand}
+        onCommandSubmit={submitSemanticCommand}
+        error={semanticError}
+      />
       <section className="debug-panel" aria-label="Sync status">
         <div className={`status-dot status-${status}`} />
         <dl>
@@ -639,6 +872,10 @@ export default function App() {
           <div>
             <dt>Objects</dt>
             <dd>{projectionCount}</dd>
+          </div>
+          <div>
+            <dt>Draft</dt>
+            <dd>{semanticCandidateCount(semanticDraft)}</dd>
           </div>
           <div>
             <dt>Synced</dt>

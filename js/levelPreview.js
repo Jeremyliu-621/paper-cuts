@@ -18,6 +18,7 @@
     status: 'idle',
     version: 0,
     projection: null,
+    semanticDraft: null,
     socket: null,
     reconnectTimer: 0,
     activityTimer: 0,
@@ -124,9 +125,10 @@
     syncUi();
   }
 
-  function updateProjection(version, projection, updatedAt) {
+  function updateProjection(version, projection, semanticDraft, updatedAt) {
     state.version = version || state.version || 0;
     state.projection = projection || null;
+    state.semanticDraft = semanticDraft || null;
     syncUi();
     if (state.onActivity && (projection || updatedAt)) {
       clearTimeout(state.activityTimer);
@@ -147,8 +149,10 @@
     if (status) status.textContent = state.status + ' · v' + (state.version || 0);
     if (count) {
       const projection = state.projection || {};
-      const total = (projection.strokes || []).length + (projection.shapes || []).length;
-      count.textContent = total ? total + ' platform candidate' + (total === 1 ? '' : 's') : 'Draw platforms on the iPad';
+      const draft = state.semanticDraft || {};
+      const total = (draft.candidates || []).length || ((projection.strokes || []).length + (projection.shapes || []).length);
+      const confirmed = (draft.candidates || []).filter((candidate) => candidate.status === 'confirmed').length;
+      count.textContent = total ? confirmed + '/' + total + ' confirmed' : 'Draw platforms on the iPad';
     }
   }
 
@@ -160,7 +164,7 @@
       if (!response.ok) throw new Error('capture ' + response.status);
       const room = await response.json();
       if (seq !== state.enterSeq) return;
-      updateProjection(room.version || 0, room.projection || state.projection, room.updatedAt);
+      updateProjection(room.version || 0, room.projection || state.projection, room.semanticDraft || state.semanticDraft, room.updatedAt);
       setStatus('loaded');
     } catch (error) {
       if (seq !== state.enterSeq) return;
@@ -177,7 +181,7 @@
     if (!response.ok) throw new Error('Capture save failed: ' + response.status);
     const room = await response.json();
     if (seq !== state.enterSeq || roomId !== state.roomId) throw new Error('Level changed before save completed.');
-    updateProjection(room.version || 0, room.projection || null, room.updatedAt);
+    updateProjection(room.version || 0, room.projection || null, room.semanticDraft || null, room.updatedAt);
     return room;
   }
 
@@ -200,10 +204,13 @@
       catch (_error) { return; }
       if (message.type === 'hello') {
         setStatus('connected');
-        updateProjection(message.version || 0, message.projection || state.projection, null);
+        updateProjection(message.version || 0, message.projection || state.projection, message.semanticDraft || state.semanticDraft, null);
       } else if (message.type === 'projection_updated') {
         setStatus('connected');
-        updateProjection(message.version || state.version, message.projection || null, message.updatedAt);
+        updateProjection(message.version || state.version, message.projection || null, message.semanticDraft || null, message.updatedAt);
+      } else if (message.type === 'semantic_draft_updated') {
+        setStatus('connected');
+        updateProjection(message.version || state.version, state.projection, message.semanticDraft || null, null);
       }
     });
 
@@ -247,6 +254,7 @@
     const saved = savedDrawingCapture(world);
     state.version = saved ? saved.version || 0 : 0;
     state.projection = saved ? saved.projection : null;
+    state.semanticDraft = null;
     state.onActivity = options.onActivity || null;
     syncUi();
     publishSelection(backend, world, state.roomId);
@@ -255,7 +263,7 @@
       restoreSavedCapture(backend, world, state.roomId)
         .then((room) => {
           if (seq !== state.enterSeq || !state.enabled || state.roomId !== (world.roomId || world.id)) return;
-          if (room) updateProjection(room.version || state.version, room.projection || state.projection, room.updatedAt);
+          if (room) updateProjection(room.version || state.version, room.projection || state.projection, room.semanticDraft || state.semanticDraft, room.updatedAt);
           setStatus('loaded');
         })
         .catch((error) => {
@@ -279,6 +287,7 @@
     state.status = 'idle';
     state.version = 0;
     state.projection = null;
+    state.semanticDraft = null;
     syncUi();
     if (shouldClearSelection) clearSelection(backendUrl);
   }
@@ -405,6 +414,36 @@
     });
   }
 
+  function renderSemanticCandidate(ctx, candidate, index) {
+    const g = candidate && candidate.geometry;
+    if (!g || !Number.isFinite(g.x) || !Number.isFinite(g.y) || !Number.isFinite(g.w) || !Number.isFinite(g.h)) return;
+    const rnd = DS.makeRng(DS.hashSeed(candidate.candidateId || candidate.geometryHash || 'semantic-candidate'));
+    const status = candidate.status || 'needs_answer';
+    let color = '#3f8f86';
+    let fill = 'rgba(63,143,134,0.13)';
+    if (status === 'confirmed') { color = '#2e8b57'; fill = 'rgba(46,139,87,0.18)'; }
+    else if (status === 'decor') { color = '#7c4e92'; fill = 'rgba(124,78,146,0.13)'; }
+    else if (status === 'ignored') { color = D.COL.inkSoft; fill = 'rgba(107,98,89,0.07)'; }
+    ctx.save();
+    D.roundedRect(ctx, g.x, g.y, g.w, g.h, Math.min(18, Math.max(5, g.h / 3)), {
+      width: status === 'confirmed' ? 8 : 6,
+      color,
+      fill,
+      rnd,
+      jitter: 0.5,
+      passes: 1,
+    });
+    ctx.font = "30px 'Patrick Hand', sans-serif";
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = D.COL.paper;
+    ctx.fillStyle = color;
+    ctx.strokeText(String(index + 1), g.x + 8, g.y - 6);
+    ctx.fillText(String(index + 1), g.x + 8, g.y - 6);
+    ctx.restore();
+  }
+
   function renderEmptyHint(ctx, view) {
     ctx.save();
     ctx.font = "42px 'Gloria Hallelujah', cursive";
@@ -438,11 +477,17 @@
     platforms.forEach((platform, index) => drawReferencePlatform(ctx, platform, index));
 
     const projection = state.projection || {};
+    const semanticDraft = state.semanticDraft || {};
+    const semanticCandidates = semanticDraft.candidates || [];
     const shapes = projection.shapes || [];
     const strokes = projection.strokes || [];
-    for (const shape of shapes) renderRectPlatform(ctx, shape);
-    for (const stroke of strokes) renderStrokePlatform(ctx, stroke);
-    if (!shapes.length && !strokes.length) renderEmptyHint(ctx, view);
+    if (semanticCandidates.length) {
+      semanticCandidates.forEach((candidate, index) => renderSemanticCandidate(ctx, candidate, index));
+    } else {
+      for (const shape of shapes) renderRectPlatform(ctx, shape);
+      for (const stroke of strokes) renderStrokePlatform(ctx, stroke);
+    }
+    if (!semanticCandidates.length && !shapes.length && !strokes.length) renderEmptyHint(ctx, view);
 
     ctx.restore();
     return true;
