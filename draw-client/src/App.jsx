@@ -854,6 +854,7 @@ function EditorToolbar({
   onAddPlatform,
   onAddPortal,
   onDelete,
+  onNudge,
 }) {
   return (
     <div className="magic-toolbar" aria-label="Level editor tools">
@@ -890,6 +891,12 @@ function EditorToolbar({
       >
         Delete
       </button>
+      <div className="magic-toolbar-group nudge" role="group" aria-label="Move selected object">
+        <button type="button" onClick={() => onNudge(0, -24)} disabled={!selectedItem} title="Move up">Up</button>
+        <button type="button" onClick={() => onNudge(-24, 0)} disabled={!selectedItem} title="Move left">Left</button>
+        <button type="button" onClick={() => onNudge(24, 0)} disabled={!selectedItem} title="Move right">Right</button>
+        <button type="button" onClick={() => onNudge(0, 24)} disabled={!selectedItem} title="Move down">Down</button>
+      </div>
     </div>
   )
 }
@@ -1108,21 +1115,36 @@ export default function App() {
     setSelectedStageItem(null)
   }, [selectedStageItem, sendStageEdit])
 
+  const nudgeSelectedStageItem = useCallback((dx, dy) => {
+    if (!selectedStageItem) return
+    const stage = stageFromReference(selectedRoom?.stageReference)
+    const collection = selectedStageItem.type === 'portal' ? stage.portals : stage.platforms
+    const current = collection.find((item, index) => itemEditorId(selectedStageItem.type, item, index) === selectedStageItem.id)
+    if (!current) return
+    sendStageEdit({
+      type: selectedStageItem.type === 'portal' ? 'update_portal' : 'update_platform',
+      targetId: selectedStageItem.id,
+      patch: { x: (current.x || 0) + dx, y: (current.y || 0) + dy },
+    })
+  }, [selectedRoom?.stageReference, selectedStageItem, sendStageEdit])
+
   const tldrawComponents = useMemo(
     () => ({
       OnTheCanvas: () => (
         <>
           <CanvasStageReferenceLayer stageReference={selectedRoom?.stageReference} />
           <SemanticCandidateLayer semanticDraft={semanticDraft} selectedCandidateId={selectedCandidateId} />
-          {activeTool === 'edit' ? (
-            <StageEditLayer
-              stageReference={selectedRoom?.stageReference}
-              selectedItem={selectedStageItem}
-              onSelectItem={setSelectedStageItem}
-              onCommitEdit={sendStageEdit}
-            />
-          ) : null}
         </>
+      ),
+      InFrontOfTheCanvas: () => (
+        activeTool === 'edit' ? (
+          <StageEditLayer
+            stageReference={selectedRoom?.stageReference}
+            selectedItem={selectedStageItem}
+            onSelectItem={setSelectedStageItem}
+            onCommitEdit={sendStageEdit}
+          />
+        ) : null
       ),
     }),
     [activeTool, semanticDraft, selectedCandidateId, selectedRoom?.stageReference, selectedStageItem, sendStageEdit],
@@ -1589,6 +1611,7 @@ export default function App() {
         onAddPlatform={addStagePlatform}
         onAddPortal={addStagePortal}
         onDelete={deleteSelectedStageItem}
+        onNudge={nudgeSelectedStageItem}
       />
       <aside className="editor-chrome" aria-label="Magic Board editor tools">
         <div className="editor-chrome-scroll">

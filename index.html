@@ -20,6 +20,7 @@
     d.textContent='JS error(s):\n'+window.__errs.join('\n');
   }
   window.addEventListener('error', function(e){
+    if ((e.message === 'Script error.' || !e.message) && !e.filename && window.__dsSuppressOpaqueScriptErrorsUntil && Date.now() < window.__dsSuppressOpaqueScriptErrorsUntil) return;
     __showErr((e.message||'error')+'  @ '+(e.filename||'').split('/').pop()+':'+e.lineno);
   });
   window.addEventListener('unhandledrejection', function(e){ __showErr('promise: '+(e.reason&&e.reason.message||e.reason)); });

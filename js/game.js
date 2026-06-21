@@ -50,7 +50,7 @@
       this.view = d.view;
       // resolve the selected mode + map (default Smash on the editable Meadow stage)
       this.modeId = this.modeId || 'smash';
-      this.mapId = this.mapId || 'meadow';
+      this.mapId = this.mapId || 'demo';
       this.mode = DS.Modes.get(this.modeId);
       // play a CLONE of the map's editable+persistent stage, so a match (moving platforms,
       // cannon timers, breakable crates, portal cooldowns) never mutates the saved stage

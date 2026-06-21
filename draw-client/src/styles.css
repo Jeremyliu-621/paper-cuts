@@ -406,7 +406,7 @@ button {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   left: max(12px, env(safe-area-inset-left));
-  z-index: 34;
+  z-index: 10000;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;

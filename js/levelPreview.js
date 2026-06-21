@@ -333,6 +333,7 @@
         applyStageEditToWorld(message.operation);
         state.version = message.version || state.version;
         if (state.onStageEdit) state.onStageEdit(state.world, message);
+        syncUi();
         publishSelection(new URL(state.backendUrl), state.world, state.roomId);
       }
     });

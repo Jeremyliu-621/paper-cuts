@@ -309,7 +309,7 @@
   const countdownOverlay = document.getElementById('countdown-overlay');
   const countdownCanvas = document.getElementById('countdown-canvas');
   let selMode = game.modeId || 'smash';
-  let selMap = game.mapId || 'meadow';
+  let selMap = game.mapId || 'demo';
   let ults = [], ready = [], ultimateJobs = [], cd = null; // cd = active countdown state (null when idle)
   let playerSkins = [], drawIndex = -1, drawing = null, drawHist = [];
   const drawOverlay = document.getElementById('draw-overlay');
@@ -1250,7 +1250,7 @@
     } catch (e) {
       window.__showErr('MAPS: ERR ' + e.message + ' | ' + out.join(' ') + '  FAIL');
     }
-    game.mapId = 'meadow'; game.rebuild(); game.state = 'paused';
+    game.mapId = 'demo'; game.rebuild(); game.state = 'paused';
   }
 
   // dev visual: load a specific map for a screenshot, e.g. #mapshow=cannons

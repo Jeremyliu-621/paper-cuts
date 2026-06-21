@@ -85,8 +85,13 @@
     if (overlay) overlay.hidden = true;
   }
 
+  function suppressOpaqueScriptErrors(ms) {
+    global.__dsSuppressOpaqueScriptErrorsUntil = Date.now() + (ms || 2500);
+  }
+
   async function loadPoseLandmarker() {
     if (landmarker || loadingPose) return loadingPose || landmarker;
+    suppressOpaqueScriptErrors(5000);
     loadingPose = import(POSE_CDN).then(async (vision) => {
       const fileset = await vision.FilesetResolver.forVisionTasks(WASM_CDN);
       landmarker = await vision.PoseLandmarker.createFromOptions(fileset, {
@@ -109,6 +114,15 @@
       const POSE_CDN = ${JSON.stringify(POSE_CDN)};
       const WASM_CDN = ${JSON.stringify(WASM_CDN)};
       const MODEL_URL = ${JSON.stringify(MODEL_URL)};
+      self.addEventListener('error', (event) => {
+        self.postMessage({ type: 'error', message: event && event.message ? event.message : 'pose worker script failed' });
+        if (event.preventDefault) event.preventDefault();
+      });
+      self.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason;
+        self.postMessage({ type: 'error', message: reason && reason.message ? reason.message : String(reason || 'pose worker promise failed') });
+        if (event.preventDefault) event.preventDefault();
+      });
       self.onmessage = async (event) => {
         const data = event.data || {};
         if (data.type === 'init') {
@@ -145,6 +159,7 @@
     `;
     try {
       const blob = new Blob([source], { type: 'text/javascript' });
+      suppressOpaqueScriptErrors(5000);
       poseWorker = new Worker(URL.createObjectURL(blob), { type: 'module' });
       poseWorker.onmessage = (event) => {
         const data = event.data || {};
@@ -156,7 +171,11 @@
         }
         if (data.type === 'error') failWorker(data.message);
       };
-      poseWorker.onerror = (event) => failWorker(event.message || 'pose worker failed');
+      poseWorker.onerror = (event) => {
+        if (event && event.preventDefault) event.preventDefault();
+        failWorker((event && event.message) || 'pose worker failed');
+        return true;
+      };
       poseWorker.postMessage({ type: 'init' });
       return true;
     } catch (error) {

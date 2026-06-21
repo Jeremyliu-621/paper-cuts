@@ -125,8 +125,12 @@
 
   // ---- maps ----------------------------------------------------------------
   const Maps = {
-    _order: ['meadow', 'twin', 'loft', 'quarry', 'ruins', 'crates', 'bounce', 'cannons', 'portals', 'chaos'],
+    _order: ['demo', 'meadow', 'twin', 'loft', 'quarry', 'ruins', 'crates', 'bounce', 'cannons', 'portals', 'chaos'],
     defs: {
+      demo: {
+        id: 'demo', name: 'Demo', editable: true,
+        desc: 'The original Doodle Smash menu flow stage: simple ground, two fighters, and the classic lobby setup.',
+      },
       meadow: {
         id: 'meadow', name: 'Meadow', editable: true,
         desc: 'A sunny field with rolling hills, trees and a flower-strewn ground. The stage the Editor edits.',
