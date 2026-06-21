@@ -823,10 +823,11 @@
         const topC = topContour(p);
         const eL = topAt(topC, p.x + 30), eR = topAt(topC, pr - 30);
         const flatTop = eL && eR && Math.abs(eL.y - eR.y) < p.w * 0.18;
-        // a little hilltop HAMLET: cottages perch on the highest wide, flat, elevated tops
-        const isTown = !isBase && flatTop && p.w >= 240 && p.y <= townY + 150 && density >= 0.5;
-        if (isTown) {
-          const houses = Math.max(1, Math.min(3, Math.round(p.w / 380)));
+        // a little hilltop HAMLET — RARE: only the occasional high, wide, flat top gets a cottage or two
+        const isTown = !isBase && flatTop && p.w >= 300 && p.y <= townY + 120 && density >= 0.5;
+        const hasHamlet = isTown && DS.makeRng(seed + 590)() < 0.22;
+        if (hasHamlet) {
+          const houses = Math.max(1, Math.min(2, Math.round(p.w / 620)));
           for (let i = 0; i < houses; i++) {
             const r3 = DS.makeRng(seed + 600 + i * 17);
             const hx = p.x + p.w * ((i + 0.5) / houses) + r3.sym(p.w * 0.08), ta = topAt(topC, hx);
@@ -834,14 +835,14 @@
           }
         }
         // a few varied plants — fewer when houses already crowd the roof
-        const n = Math.max(0, Math.round((p.w / (isTown ? 620 : 300)) * density));
+        const n = Math.max(0, Math.round((p.w / (hasHamlet ? 620 : 300)) * density));
         for (let i = 0; i < n; i++) {
           const r2 = DS.makeRng(seed + 700 + i * 29);
           const x = p.x + 32 + (p.w - 64) * r2(), ta = topAt(topC, x);
           front.push({ t: 'plant', x, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, kind: pick(r2, isBase ? TOP_KINDS_BIG : TOP_KINDS), s: 0.76 + r2() * 0.5, seed: seed + 700 + i });
         }
         // a low railing along a wide, roughly-flat top (some of them) — reads as a balcony/parapet
-        if (p.w > 300 && !isTown && density >= 0.6 && flatTop && DS.makeRng(seed + 900)() < 0.5) {
+        if (p.w > 300 && !hasHamlet && density >= 0.6 && flatTop && DS.makeRng(seed + 900)() < 0.5) {
           const steps = Math.max(3, Math.round(p.w / 70)), pts = [];
           for (let i = 0; i <= steps; i++) { const x = p.x + 24 + (p.w - 48) * (i / steps), ta = topAt(topC, x); pts.push([x, ta ? ta.y : p.y]); }
           front.push({ t: 'railing', pts, seed: seed + 910 });
