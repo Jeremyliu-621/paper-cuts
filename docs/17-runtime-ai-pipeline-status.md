@@ -47,10 +47,18 @@ DS.AI.connectChloe('http://localhost:8500/mechanic');       // mechanics
 ## 2. The sprite pipeline (the hard-won part)
 
 **Current:** `server.js /fal-enhance` → **Recraft v3 text-to-image** (`fal-ai/recraft/v3/text-to-image`,
-style `digital_illustration/hand_drawn`) draws a *clean new doodle from the recognized word* → returns
-the **raw** WebP → the client (`js/ai.js _isolateDoodle`) runs a **fast connected-components pass** that
-keeps only the largest shape, turning the plain background AND Recraft's scattered decoration blobs
-fully transparent.
+style `digital_illustration/hand_drawn`) draws a *clean new doodle from the recognized word* →
+**Bria background removal** (`fal-ai/bria/background/remove`, saliency — removes the patterned/scene
+backgrounds Recraft scatters) → the client (`js/ai.js _isolateDoodle`) runs a **fast
+connected-components keep-largest** that drops any leftover *detached* decoration blobs (rain dashes,
+sparkles). Result: clean isolated doodle on transparent. ~11–12s/sprite (2 fal calls).
+
+**Suite test (16 objects, 2026-06-21):** Recraft hand_drawn backgrounds are a *lottery* — sometimes
+plain, often striped/grid/rain/scene. Plain connected-components grabbed the pattern; "keep interior"
+deleted edge-filling objects; BiRefNet left rain dashes. **Bria + keep-largest** is the winner: clean
+for the common game items (sword, water, apple, star, key, shield, bomb, mushroom, crown, heart, fire,
+ice); a few geometric-background cases (axe, bow, gun) still imperfect. Good enough for the demo — kids
+draw the clean-working things. Test artifacts in `/tmp/suite/`, `/tmp/suite-final.png`.
 
 - `FAL_GEN_MODE=text` (default) = text-to-image (clean asset). `FAL_GEN_MODE=image` = image-to-image
   (traces the doodle — kept only for comparison; **rejected**, see §3).
