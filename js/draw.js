@@ -14,18 +14,6 @@
     power: '#2f6fe0',   // vibrant "charged" blue — ultimate ready / in use
     powerDeep: '#1c46a8',
     powerSoft: '#5b8fcf', // gentler, easier-on-the-eyes blue — the building-up "charge" tint
-    // soft pastel fills — a gentle, low-saturation colour wash UNDER the ink line-art (the ink
-    // stroke still carries every shape, so it stays a minimalist doodle). Light + clean, sensible
-    // per material, but never vivid. Used for platform bodies (by kind) and the procedural scenery.
-    mGround: '#cfe3ad',   // soft grass green
-    mWood: '#ecd9b2',     // pale wood tan
-    mStone: '#d3dce2',    // pale blue-grey stone
-    mCrystal: '#cbe6e0',  // pale aqua
-    mBox: '#eed8b0',      // pale crate tan
-    mFloat: '#d8e8f1',    // pale sky blue
-    leaf: '#86ad6a',      // foliage stroke — soft green
-    leafFill: '#d3e7b6',  // foliage fill — pale green
-    stoneSoft: '#d8dde0', // scenery structures (pillars/arches/islands) — pale stone-grey
   };
 
   // blend two hex colours ('#rrggbb') by t in 0..1 → '#rrggbb'
@@ -37,6 +25,19 @@
     const bl = Math.round((ah & 255) + ((bh & 255) - (ah & 255)) * t);
     return '#' + ((1 << 24) + (r << 16) + (g << 8) + bl).toString(16).slice(1);
   }
+
+  // material fills: a VERY light wash — at most ~30% of a clean hue mixed into the warm paper, so a
+  // shape reads as "that material" while staying almost monochrome. The ink line still does the work.
+  const wash = (hue, t) => mix(COL.paper, hue, t);
+  COL.mGround = wash('#7cc242', 0.28);   // grass green
+  COL.mWood = wash('#d99a3f', 0.24); // wood tan
+  COL.mStone = wash('#8aa6bd', 0.26);    // blue-grey stone
+  COL.mCrystal = wash('#4ec4bc', 0.24);  // aqua
+  COL.mBox = wash('#dd9a36', 0.24);      // crate tan
+  COL.mFloat = wash('#79bce4', 0.24);    // sky blue
+  COL.leafFill = wash('#82c247', 0.3);   // foliage fill — soft green
+  COL.leaf = mix('#4e8a32', COL.paper, 0.2); // foliage stroke — a clearer green (it's a thin line)
+  COL.stoneSoft = wash('#8197a8', 0.22); // structures (pillars/arches/islands) — faint stone-grey
 
   // ---- level of detail -----------------------------------------------------
   // when the camera is zoomed way out (e.g. 4 players spread across the arena) the faint
