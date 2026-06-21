@@ -28,7 +28,7 @@
 <body>
   <div id="app">
     <header id="topbar">
-      <div class="brand">Doodle&nbsp;Smash</div>
+      <button id="brand-home" class="brand" type="button" aria-label="Open Game Library">Doodle&nbsp;Smash</button>
       <nav class="tabs">
         <button class="tab active" data-tab="play">Play</button>
         <button class="tab" data-tab="editor">Editor</button>
@@ -45,6 +45,38 @@
 
       <!-- Editor side panel (hidden in Play mode) -->
       <aside id="editor-panel" hidden></aside>
+
+      <!-- Phase 1.5 desktop entry point: saved world library before play -->
+      <div id="library-overlay" class="screen" hidden>
+        <div class="library-page">
+          <div class="library-head">
+            <div>
+              <div class="library-kicker">Magic Board</div>
+              <h1>Game Library</h1>
+            </div>
+            <button id="library-new">+ New Game</button>
+          </div>
+          <div id="library-content"></div>
+        </div>
+      </div>
+
+      <!-- Phase 1.5 desktop level preview: read-only mirror of the iPad draw-client room -->
+      <div id="level-preview-ui" hidden>
+        <div class="level-preview-bar">
+          <div class="level-preview-copy">
+            <div id="level-preview-room" class="level-preview-room">Room pending</div>
+            <h1 id="level-preview-title">Level Preview</h1>
+          </div>
+          <div class="level-preview-meta">
+            <span id="level-preview-count">Draw platforms on the iPad</span>
+            <span id="level-preview-status">idle · v0</span>
+          </div>
+          <div class="level-preview-actions">
+            <button id="level-preview-save" class="level-preview-button">Save</button>
+            <button id="level-preview-library" class="level-preview-button secondary">Library</button>
+          </div>
+        </div>
+      </div>
 
       <!-- Setup page: pick a game mode + map (icon tiles, minimal text) -->
       <div id="menu-overlay" class="screen" hidden>
@@ -137,7 +169,7 @@
   <script>
     (function () {
       var files = ['rng', 'draw', 'stageReferenceData', 'data', 'character', 'skin', 'effects', 'audio', 'input', 'physics',
-        'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'createOverlay', 'main'];
+        'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'createOverlay', 'levelPreview', 'worldLibrary', 'main'];
       var http = location.protocol === 'http:' || location.protocol === 'https:';
       var bust = http ? '?v=' + Date.now() : '';
       for (var i = 0; i < files.length; i++) {

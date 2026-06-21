@@ -36,6 +36,68 @@ body {
   background: #f7f4ec;
 }
 
+.draw-app-waiting {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.selection-wait-panel {
+  width: min(520px, 100%);
+  padding: 20px 22px;
+  border: 2px solid #2f2a26;
+  border-radius: 8px;
+  background: #fffaf0;
+  box-shadow: 5px 6px 0 rgba(47, 42, 38, 0.14);
+}
+
+.selection-wait-panel h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.selection-wait-panel p {
+  margin: 0 0 14px;
+  color: rgba(31, 37, 40, 0.72);
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.selection-wait-panel dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.selection-wait-panel dl div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.selection-wait-panel dt,
+.selection-wait-panel dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.selection-wait-panel dt {
+  color: rgba(31, 37, 40, 0.62);
+  font-weight: 700;
+}
+
+.selection-wait-panel dd {
+  font-weight: 750;
+}
+
+.selection-wait-panel .selection-error {
+  margin-top: 14px;
+  color: #a33a2a;
+  font-weight: 700;
+}
+
 .platform-reference-frame {
   position: absolute;
   top: 0;

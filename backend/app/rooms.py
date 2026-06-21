@@ -6,7 +6,13 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from .schemas import CanvasCaptureMessage, ProjectionUpdatedMessage, RecentEvent, RoomCaptureResponse
+from .schemas import (
+    CanvasCaptureMessage,
+    ProjectionUpdatedMessage,
+    RecentEvent,
+    RoomCaptureResponse,
+    RoomSelectionResponse,
+)
 
 MAX_RECENT_EVENTS = 20
 
@@ -25,6 +31,8 @@ class RoomRegistry:
     def __init__(self) -> None:
         self._rooms: dict[str, RoomState] = {}
         self._connections: dict[str, set[WebSocket]] = {}
+        self._selection_connections: set[WebSocket] = set()
+        self._selection = RoomSelectionResponse()
 
     def get_room(self, room_id: str) -> RoomState:
         if room_id not in self._rooms:
@@ -41,6 +49,48 @@ class RoomRegistry:
             updatedAt=room.updated_at,
             recentEvents=list(room.recent_events),
         )
+
+    def select_room(
+        self,
+        room_id: str,
+        world_id: str | None = None,
+        world_name: str | None = None,
+    ) -> RoomSelectionResponse:
+        self.get_room(room_id)
+        self._selection = RoomSelectionResponse(
+            roomId=room_id,
+            worldId=world_id,
+            worldName=world_name,
+            selectedAt=datetime.now(UTC),
+        )
+        return self._selection
+
+    def current_selection(self) -> RoomSelectionResponse:
+        return self._selection
+
+    def clear_selection(self) -> RoomSelectionResponse:
+        self._selection = RoomSelectionResponse()
+        return self._selection
+
+    def connect_selection(self, websocket: WebSocket) -> None:
+        self._selection_connections.add(websocket)
+
+    def disconnect_selection(self, websocket: WebSocket) -> None:
+        self._selection_connections.discard(websocket)
+
+    async def broadcast_selection(self) -> None:
+        stale: list[WebSocket] = []
+        payload = {
+            "type": "selection_updated",
+            **self._selection.model_dump(mode="json", by_alias=True),
+        }
+        for websocket in list(self._selection_connections):
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                stale.append(websocket)
+        for websocket in stale:
+            self.disconnect_selection(websocket)
 
     def connect(self, room_id: str, websocket: WebSocket) -> None:
         self.get_room(room_id)
@@ -90,6 +140,8 @@ class RoomRegistry:
     def reset(self) -> None:
         self._rooms.clear()
         self._connections.clear()
+        self._selection_connections.clear()
+        self._selection = RoomSelectionResponse()
 
 
 rooms = RoomRegistry()

@@ -30,6 +30,23 @@ class RoomCaptureResponse(BaseModel):
     recent_events: list[RecentEvent] = Field(alias="recentEvents")
 
 
+class RoomSelectionRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    room_id: str = Field(alias="roomId")
+    world_id: str | None = Field(default=None, alias="worldId")
+    world_name: str | None = Field(default=None, alias="worldName")
+
+
+class RoomSelectionResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    room_id: str | None = Field(default=None, alias="roomId")
+    world_id: str | None = Field(default=None, alias="worldId")
+    world_name: str | None = Field(default=None, alias="worldName")
+    selected_at: datetime | None = Field(default=None, alias="selectedAt")
+
+
 class CanvasCaptureMessage(BaseModel):
     model_config = ConfigDict(extra="allow", populate_by_name=True)
 

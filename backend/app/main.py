@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from .rooms import rooms
-from .schemas import BACKEND_VERSION, CanvasCaptureMessage, ErrorMessage, HelloMessage
+from .schemas import BACKEND_VERSION, CanvasCaptureMessage, ErrorMessage, HelloMessage, RoomSelectionRequest
 
 app = FastAPI(title="Magic Board Backend", version=BACKEND_VERSION)
 
@@ -29,6 +29,55 @@ async def health() -> dict[str, bool | str]:
 @app.get("/rooms/{room_id}/capture")
 async def get_room_capture(room_id: str) -> dict[str, Any]:
     return rooms.capture_response(room_id).model_dump(mode="json", by_alias=True)
+
+
+@app.post("/rooms/{room_id}/capture")
+async def save_room_capture(room_id: str, capture: CanvasCaptureMessage) -> dict[str, Any]:
+    update = rooms.store_capture(room_id, capture)
+    await rooms.broadcast(room_id, update)
+    return rooms.capture_response(room_id).model_dump(mode="json", by_alias=True)
+
+
+@app.get("/selection/current")
+async def get_current_selection() -> dict[str, Any]:
+    return rooms.current_selection().model_dump(mode="json", by_alias=True)
+
+
+@app.post("/selection/current")
+async def set_current_selection(selection: RoomSelectionRequest) -> dict[str, Any]:
+    current = rooms.select_room(
+        room_id=selection.room_id,
+        world_id=selection.world_id,
+        world_name=selection.world_name,
+    )
+    await rooms.broadcast_selection()
+    return current.model_dump(mode="json", by_alias=True)
+
+
+@app.delete("/selection/current")
+async def clear_current_selection() -> dict[str, Any]:
+    current = rooms.clear_selection()
+    await rooms.broadcast_selection()
+    return current.model_dump(mode="json", by_alias=True)
+
+
+@app.websocket("/ws/selection")
+async def selection_socket(websocket: WebSocket) -> None:
+    await websocket.accept()
+    rooms.connect_selection(websocket)
+    await websocket.send_json(
+        {
+            "type": "selection_hello",
+            **rooms.current_selection().model_dump(mode="json", by_alias=True),
+        }
+    )
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        rooms.disconnect_selection(websocket)
 
 
 def _validation_message(error: ValidationError) -> str:

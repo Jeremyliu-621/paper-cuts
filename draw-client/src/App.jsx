@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Tldraw,
   createShapeId,
@@ -39,12 +39,6 @@ const COLOR_TO_HEX = {
   pink: '#d46aa4',
 }
 
-function getRoomId() {
-  const params = new URLSearchParams(window.location.search)
-  const room = params.get('room')?.trim()
-  return room || 'demo'
-}
-
 function getBackendUrl() {
   const params = new URLSearchParams(window.location.search)
   const configuredUrl = params.get('backend') || import.meta.env.VITE_BACKEND_URL
@@ -78,6 +72,15 @@ function websocketUrlForRoom(backendUrl, roomId) {
 function captureUrlForRoom(backendUrl, roomId) {
   const url = new URL(backendUrl)
   url.pathname = `/rooms/${encodeURIComponent(roomId)}/capture`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function selectionWsUrlForBackend(backendUrl) {
+  const url = new URL(backendUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = '/ws/selection'
   url.search = ''
   url.hash = ''
   return url.toString()
@@ -193,6 +196,10 @@ function makeProjection(editor, capture) {
   }
 }
 
+function projectionObjectCount(projection) {
+  return (projection?.strokes?.length || 0) + (projection?.shapes?.length || 0) + (projection?.labels?.length || 0)
+}
+
 function ensureStageFrame(editor) {
   if (!editor.getShape(FRAME_SHAPE_ID)) {
     editor.createShapes([
@@ -289,16 +296,21 @@ function PlatformReferenceLayer() {
 }
 
 export default function App() {
-  const roomId = useMemo(getRoomId, [])
   const backendUrl = useMemo(
     () => normalizeBackendUrl(getBackendUrl()),
     [],
   )
+  const [selectedRoom, setSelectedRoom] = useState(null)
+  const roomId = selectedRoom?.roomId || ''
+  const selectionWsUrl = useMemo(
+    () => selectionWsUrlForBackend(backendUrl),
+    [backendUrl],
+  )
   const urls = useMemo(
-    () => ({
+    () => (roomId ? {
       capture: captureUrlForRoom(backendUrl, roomId),
       websocket: websocketUrlForRoom(backendUrl, roomId),
-    }),
+    } : null),
     [backendUrl, roomId],
   )
 
@@ -310,6 +322,9 @@ export default function App() {
   const mountedRef = useRef(false)
   const mountIdRef = useRef(0)
   const loadingCaptureRef = useRef(false)
+  const pendingCaptureRef = useRef(false)
+  const localHadUserContentRef = useRef(false)
+  const userInteractedRef = useRef(false)
   const clientIdRef = useRef(createClientId())
 
   const [status, setStatus] = useState('idle')
@@ -318,12 +333,104 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
   const [projectionCount, setProjectionCount] = useState(0)
   const [error, setError] = useState('')
+  const [selectionStatus, setSelectionStatus] = useState('waiting')
   const tldrawComponents = useMemo(
     () => ({
       OnTheCanvas: PlatformReferenceLayer,
     }),
     [],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    let socket = null
+    let reconnectTimer = 0
+
+    const applySelection = (selection, source) => {
+      if (cancelled) return
+      if (selection.roomId) {
+        setSelectionStatus(source || 'ready')
+        setError('')
+        setSelectedRoom((current) => {
+          if (current?.roomId && current.roomId !== selection.roomId) {
+            window.location.reload()
+            return current
+          }
+          if (
+            current?.roomId === selection.roomId
+            && current?.worldId === selection.worldId
+            && current?.worldName === selection.worldName
+          ) {
+            return current
+          }
+          return {
+            roomId: selection.roomId,
+            worldId: selection.worldId || selection.roomId,
+            worldName: selection.worldName || null,
+          }
+        })
+      } else {
+        setSelectionStatus('waiting')
+        setSelectedRoom((current) => {
+          if (current?.roomId) {
+            window.location.reload()
+            return current
+          }
+          return null
+        })
+      }
+    }
+
+    const connectSelectionSocket = () => {
+      if (cancelled) return
+      window.clearTimeout(reconnectTimer)
+      setSelectionStatus((current) => (current === 'waiting' ? current : 'connecting'))
+      socket = new WebSocket(selectionWsUrl)
+
+      socket.addEventListener('open', () => {
+        if (!cancelled) setSelectionStatus('listening')
+      })
+
+      socket.addEventListener('message', (event) => {
+        let message
+        try {
+          message = JSON.parse(event.data)
+        } catch (_error) {
+          return
+        }
+        if (message.type === 'selection_hello' || message.type === 'selection_updated') {
+          applySelection(message, message.type === 'selection_updated' ? 'updated' : 'listening')
+        }
+      })
+
+      socket.addEventListener('close', () => {
+        if (cancelled) return
+        setSelectionStatus('reconnecting')
+        reconnectTimer = window.setTimeout(connectSelectionSocket, RECONNECT_DELAY_MS)
+      })
+
+      socket.addEventListener('error', () => {
+        if (!cancelled) setSelectionStatus('selection socket error')
+      })
+    }
+
+    connectSelectionSocket()
+    return () => {
+      cancelled = true
+      window.clearTimeout(reconnectTimer)
+      socket?.close()
+    }
+  }, [selectionWsUrl])
+
+  useEffect(() => {
+    setStatus(roomId ? 'idle' : 'waiting')
+    setBackendVersion('unknown')
+    setRoomVersion(0)
+    setLastSyncedAt(null)
+    setProjectionCount(0)
+    localHadUserContentRef.current = false
+    userInteractedRef.current = false
+  }, [roomId])
 
   const sendCaptureNow = useCallback(() => {
     const editor = editorRef.current
@@ -332,10 +439,18 @@ export default function App() {
 
     const { document } = getSnapshot(editor.store)
     const projection = makeProjection(editor, document)
-    setProjectionCount(projection.strokes.length + projection.shapes.length + projection.labels.length)
+    const objectCount = projectionObjectCount(projection)
+    setProjectionCount(objectCount)
+
+    if (objectCount > 0) localHadUserContentRef.current = true
+    if (objectCount === 0 && !localHadUserContentRef.current) {
+      pendingCaptureRef.current = false
+      return
+    }
 
     if (!socket || socket.readyState !== WebSocket.OPEN) return
 
+    pendingCaptureRef.current = false
     socket.send(
       JSON.stringify({
         type: 'canvas_capture',
@@ -349,13 +464,15 @@ export default function App() {
 
   const scheduleCaptureSend = useCallback(() => {
     if (loadingCaptureRef.current) return
+    if (!userInteractedRef.current) return
+    pendingCaptureRef.current = true
     window.clearTimeout(sendTimerRef.current)
     sendTimerRef.current = window.setTimeout(sendCaptureNow, SYNC_DEBOUNCE_MS)
   }, [sendCaptureNow])
 
   const connectWebSocket = useCallback((mountId) => {
     window.clearTimeout(reconnectTimerRef.current)
-    if (!mountedRef.current || mountIdRef.current !== mountId) return
+    if (!mountedRef.current || mountIdRef.current !== mountId || !urls) return
 
     setStatus('connecting')
     const socket = new WebSocket(urls.websocket)
@@ -365,7 +482,7 @@ export default function App() {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
       setStatus('connected')
       setError('')
-      sendCaptureNow()
+      if (pendingCaptureRef.current) sendCaptureNow()
     })
 
     socket.addEventListener('message', (event) => {
@@ -402,10 +519,11 @@ export default function App() {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
       setStatus('error')
     })
-  }, [sendCaptureNow, urls.websocket])
+  }, [sendCaptureNow, urls])
 
   const handleMount = useCallback(
     (editor) => {
+      if (!urls) return undefined
       const mountId = mountIdRef.current + 1
       mountIdRef.current = mountId
       mountedRef.current = true
@@ -413,6 +531,7 @@ export default function App() {
       setStatus('loading')
 
       const loadInitialCapture = async () => {
+        loadingCaptureRef.current = true
         try {
           const response = await fetch(urls.capture)
           if (!mountedRef.current || mountIdRef.current !== mountId) return
@@ -420,9 +539,9 @@ export default function App() {
           const room = await response.json()
           if (!mountedRef.current || mountIdRef.current !== mountId) return
           setRoomVersion(room.version ?? 0)
+          localHadUserContentRef.current = projectionObjectCount(room.projection) > 0
 
           if (room.capture) {
-            loadingCaptureRef.current = true
             loadSnapshot(editor.store, { document: room.capture })
           }
           ensureStageFrame(editor)
@@ -450,6 +569,7 @@ export default function App() {
         mountIdRef.current += 1
         window.clearTimeout(sendTimerRef.current)
         window.clearTimeout(reconnectTimerRef.current)
+        pendingCaptureRef.current = false
         cleanupStoreListenerRef.current?.()
         cleanupStoreListenerRef.current = null
         socketRef.current?.close()
@@ -457,12 +577,38 @@ export default function App() {
         editorRef.current = null
       }
     },
-    [connectWebSocket, scheduleCaptureSend, urls.capture],
+    [connectWebSocket, scheduleCaptureSend, urls],
   )
 
+  if (!roomId) {
+    return (
+      <main className="draw-app draw-app-waiting">
+        <section className="selection-wait-panel" aria-label="Desktop room selection">
+          <h1>Waiting for desktop selection</h1>
+          <p>Open a level on the desktop with Edit Level.</p>
+          <dl>
+            <div>
+              <dt>Status</dt>
+              <dd>{selectionStatus}</dd>
+            </div>
+            <div>
+              <dt>Backend</dt>
+              <dd>{backendUrl.toString()}</dd>
+            </div>
+          </dl>
+          {error ? <p className="selection-error">{error}</p> : null}
+        </section>
+      </main>
+    )
+  }
+
   return (
-    <main className="draw-app">
-      <Tldraw onMount={handleMount} components={tldrawComponents} />
+    <main
+      className="draw-app"
+      onPointerDownCapture={() => { userInteractedRef.current = true }}
+      onKeyDownCapture={() => { userInteractedRef.current = true }}
+    >
+      <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} />
       <section className="debug-panel" aria-label="Sync status">
         <div className={`status-dot status-${status}`} />
         <dl>
@@ -473,6 +619,10 @@ export default function App() {
           <div>
             <dt>Room</dt>
             <dd>{roomId}</dd>
+          </div>
+          <div>
+            <dt>World</dt>
+            <dd>{selectedRoom?.worldName || selectedRoom?.worldId || 'selected'}</dd>
           </div>
           <div>
             <dt>Reference</dt>

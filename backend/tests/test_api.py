@@ -46,6 +46,101 @@ def test_empty_room_capture() -> None:
     }
 
 
+def test_current_selection_starts_empty() -> None:
+    client = TestClient(app)
+
+    response = client.get("/selection/current")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "roomId": None,
+        "worldId": None,
+        "worldName": None,
+        "selectedAt": None,
+    }
+
+
+def test_current_selection_tracks_desktop_preview_room() -> None:
+    client = TestClient(app)
+
+    response = client.post(
+        "/selection/current",
+        json={"roomId": "world-demo", "worldId": "world-demo", "worldName": "Demo World"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["roomId"] == "world-demo"
+    assert body["worldId"] == "world-demo"
+    assert body["worldName"] == "Demo World"
+    assert body["selectedAt"]
+    assert client.get("/selection/current").json() == body
+    assert client.get("/rooms/world-demo/capture").json()["roomId"] == "world-demo"
+
+
+def test_selection_websocket_receives_desktop_selection_updates() -> None:
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/selection") as websocket:
+        assert websocket.receive_json() == {
+            "type": "selection_hello",
+            "roomId": None,
+            "worldId": None,
+            "worldName": None,
+            "selectedAt": None,
+        }
+
+        response = client.post(
+            "/selection/current",
+            json={"roomId": "world-live", "worldId": "world-live", "worldName": "Live World"},
+        )
+        assert response.status_code == 200
+
+        update = websocket.receive_json()
+        assert update["type"] == "selection_updated"
+        assert update["roomId"] == "world-live"
+        assert update["worldId"] == "world-live"
+        assert update["worldName"] == "Live World"
+        assert update["selectedAt"]
+
+        response = client.delete("/selection/current")
+        assert response.status_code == 200
+
+        cleared = websocket.receive_json()
+        assert cleared == {
+            "type": "selection_updated",
+            "roomId": None,
+            "worldId": None,
+            "worldName": None,
+            "selectedAt": None,
+        }
+
+
+def test_http_capture_save_updates_room_capture() -> None:
+    client = TestClient(app)
+    capture = {"store": {"shape:desktop": {"typeName": "shape", "x": 22}}}
+    projected = projection()
+
+    response = client.post(
+        "/rooms/desktop-saved/capture",
+        json={
+            "type": "canvas_capture",
+            "capture": capture,
+            "projection": projected,
+            "clientId": "desktop-save",
+            "sentAt": "2026-06-20T12:00:00.000Z",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["roomId"] == "desktop-saved"
+    assert body["version"] == 1
+    assert body["capture"] == capture
+    assert body["projection"] == projected
+    assert client.get("/rooms/desktop-saved/capture").json()["capture"] == capture
+
+
 def test_websocket_capture_updates_room_and_http_capture() -> None:
     client = TestClient(app)
     capture = {"store": {"shape:one": {"typeName": "shape", "x": 10}}}

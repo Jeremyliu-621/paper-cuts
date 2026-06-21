@@ -25,23 +25,115 @@
   const editor = new DS.Editor(game, canvas, panel);
   syncSize();
 
+  function setActiveTab(tabName) {
+    document.querySelectorAll('.tab').forEach((tab) => {
+      tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+  }
+
+  function hideRuntimeOverlays() {
+    closeHelp();
+    closeMenu();
+    document.getElementById('draw-overlay').hidden = true;
+  }
+
+  function enterLevelPreview(world) {
+    if (!world || !DS.LevelPreview) return;
+    hideRuntimeOverlays();
+    if (worldLibrary) worldLibrary.close();
+    editor.deactivate();
+    mode = 'levelPreview';
+    setActiveTab('');
+    setPreviewSaveState('Save', false);
+    DS.LevelPreview.enter(world, {
+      onActivity(activeWorld, activity) {
+        if (!activeWorld || !worldLibrary) return;
+        worldLibrary.updateWorld(activeWorld.id, {
+          lastEditedAt: activity && activity.updatedAt ? activity.updatedAt : new Date().toISOString(),
+        });
+      },
+    });
+  }
+
+  function exitLevelPreview() {
+    if (DS.LevelPreview) DS.LevelPreview.exit();
+  }
+
+  function setPreviewSaveState(label, disabled) {
+    const button = document.getElementById('level-preview-save');
+    if (!button) return;
+    button.textContent = label;
+    button.disabled = !!disabled;
+  }
+
+  async function saveLevelPreviewCapture() {
+    if (!DS.LevelPreview || !worldLibrary) return;
+    const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
+    const activeRoomId = DS.LevelPreview.state && DS.LevelPreview.state.roomId;
+    if (!activeWorld) return;
+    setPreviewSaveState('Saving...', true);
+    try {
+      const roomCapture = await DS.LevelPreview.saveCapture();
+      if (!DS.LevelPreview.state || DS.LevelPreview.state.world !== activeWorld || DS.LevelPreview.state.roomId !== activeRoomId) {
+        throw new Error('Level changed before save completed.');
+      }
+      const updated = worldLibrary.saveDrawingCapture(activeWorld.id, roomCapture);
+      if (!updated) throw new Error('World save failed.');
+      DS.LevelPreview.state.world = updated;
+      setPreviewSaveState('Saved', true);
+      window.setTimeout(() => setPreviewSaveState('Save', false), 1200);
+    } catch (error) {
+      console.warn('level preview save failed', error);
+      setPreviewSaveState('Save failed', false);
+    }
+  }
+
+  function openHomeLibrary() {
+    if (global.history && global.history.replaceState && global.location.hash !== '#library') {
+      global.history.replaceState(null, '', global.location.pathname + global.location.search + '#library');
+    }
+    exitLevelPreview();
+    closeHelp();
+    closeMenu();
+    document.getElementById('draw-overlay').hidden = true;
+    editor.deactivate();
+    mode = 'play';
+    setActiveTab('');
+    if (game.state === 'playing') game.togglePause();
+    if (worldLibrary) worldLibrary.open();
+    else openMenu();
+  }
+
   // how many fighters a match spawns: one per joined phone (2..6), else 2 for the keyboard.
   // read live at each rebuild so newly-joined phones are included in the next match.
   game.getPlayerCount = () => {
     if (!DS.Net.available()) return 2;
     return Math.max(2, Math.min(6, DS.Net.maxSlot() || 2));
   };
+  const worldLibrary = DS.WorldLibrary && DS.WorldLibrary.init({
+    onEdit(world) {
+      enterLevelPreview(world);
+    },
+    onPlay(world) {
+      exitLevelPreview();
+      game.modeId = world.modeId || 'smash';
+      game.mapId = world.mapId || 'meadow';
+      document.querySelector('.tab[data-tab="play"]').click();
+      game.rebuild();
+      game.start();
+    },
+  });
 
   // tabs
   let mode = 'play';
   document.querySelectorAll('.tab').forEach((t) => {
     t.onclick = () => {
-      document.querySelectorAll('.tab').forEach((x) => x.classList.remove('active'));
-      t.classList.add('active');
+      setActiveTab(t.dataset.tab);
       mode = t.dataset.tab;
+      exitLevelPreview();
       // the menu/lobby/draw overlays sit over the stage area — dismiss them when entering the
       // Editor so its canvas (platform dragging etc.) isn't covered
-      if (mode === 'editor') { closeMenu(); document.getElementById('draw-overlay').hidden = true; editor.activate(); }
+      if (mode === 'editor') { closeMenu(); if (worldLibrary) worldLibrary.close(); document.getElementById('draw-overlay').hidden = true; editor.activate(); }
       else { editor.deactivate(); }
     };
   });
@@ -149,6 +241,7 @@
     menuMaps.innerHTML = ''; DS.Maps.list().forEach((m) => menuMaps.appendChild(iconCard('map', m.id, m.name, selMap === m.id, () => { selMap = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
   }
   function openMenu() {
+    if (worldLibrary) worldLibrary.close();
     if (game.state === 'playing') game.togglePause();
     if (DS.Net.available()) { DS.Net.onChange = () => { if (!lobby.hidden) refreshLobby(); }; DS.Net.host(); }
     buildSetup(); lobby.hidden = true; cancelCountdown(); menu.hidden = false;
@@ -458,7 +551,18 @@
   document.getElementById('draw-clear').onclick = () => { playerSkins[drawIndex] = DS.skin.emptySkin(); drawHist = []; };
   document.getElementById('draw-done').onclick = closeDraw;
 
+  document.getElementById('brand-home').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    openHomeLibrary();
+  };
   document.getElementById('btn-menu').onclick = () => { if (DS.Audio) DS.Audio.play('ui_confirm'); openMenu(); };
+  document.getElementById('level-preview-library').onclick = () => {
+    openHomeLibrary();
+  };
+  document.getElementById('level-preview-save').onclick = () => {
+    if (DS.Audio) DS.Audio.play('ui_confirm');
+    saveLevelPreviewCapture();
+  };
   document.getElementById('menu-start').onclick = () => { if (DS.Audio) DS.Audio.play('ui_confirm'); openLobby(); };       // Next → lobby
   document.getElementById('lobby-back').onclick = () => { if (DS.Audio) DS.Audio.play('ui_back'); cancelCountdown(); lobby.hidden = true; menu.hidden = false; };
 
@@ -489,7 +593,9 @@
       ctx.setTransform(DS.DPR, 0, 0, DS.DPR, 0, 0);
       const cssW = canvas.clientWidth, cssH = canvas.clientHeight;
 
-      if (mode === 'play') {
+      if (mode === 'levelPreview') {
+        if (DS.LevelPreview) DS.LevelPreview.render(ctx, cssW, cssH);
+      } else if (mode === 'play') {
         // --- dev camera zoom: see the whole arena / blast borders ---
         //  -  zoom out   ·   =  zoom in   ·   0  toggle overview   ·   \  back to auto
         if (DS.Input.pressed('Digit0')) game.devZoom = game.devZoom ? null : 0.3;
@@ -1381,6 +1487,7 @@
     }, 300);
   }
   if (location.hash === '#demo') { game.demo = true; game.start(); }
+  else if (location.hash === '#library') { if (worldLibrary) worldLibrary.open(); else openMenu(); }
   else if (location.hash === '#lobby') openLobby(); // preview the lobby page
   else if (location.hash === '#setup') openMenu();  // preview the setup page
   else if (location.hash === '#draw') { openLobby(); openDraw(0); } // preview the draw pad
@@ -1412,6 +1519,6 @@
     if (parts[2]) editor.action = parts[2];
     document.querySelector('.tab[data-tab="editor"]').click();
   }
-  // fresh load with no dev hash: greet with the main menu (and start hosting a lobby)
-  else if (location.hash === '') openMenu();
+  // fresh load with no dev hash: creation-first Game Library.
+  else if (location.hash === '') { if (worldLibrary) worldLibrary.open(); else openMenu(); }
 })(window);
