@@ -90,15 +90,9 @@
       // anything" loop with zero menu. Otherwise use the caller's label as before.
       if (!label && (this.vlmEndpoint || this.recognizerEndpoint)) {
         const self = this;
-        // PARALLEL: start the sprite enhance NOW (image-driven, generic label) so it overlaps with
-        // recognition instead of waiting ~5s for it — roughly halves the time-to-good-sprite. The
-        // recognition result only drives the LABEL + mechanic + CHLOE (skipEnhance=true below).
-        if (this.falEndpoint || this.endpoint) {
-          const b64 = stripDataUrl(this._rasterizeUrl(strokes));
-          if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);
-          if (this.endpoint) this._enhanceInto(prop, b64, prop.label);
-        }
-        this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts, true); });
+        // text-to-image needs the LABEL to draw a clean icon, so recognition runs first, then the
+        // enhance fires with the real label (inside _applyRecognition). Sequential by necessity.
+        this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts); });
       } else {
         // use prop.label (always non-empty: defaults to 'thing') so a blank label never sends an
         // empty string to CHLOE/fal. opts.description (a typed phrase) drives CHLOE when present.
@@ -156,6 +150,7 @@
     // that lands after CAELLUM is dropped. fal only marks prop._falDone, never prop.enhanced, so the
     // later CAELLUM swap always wins regardless of arrival order. Never throws into the spawn path.
     _falEnhanceInto: function (prop, image_b64, label) {
+      const self = this;
       prop._enhancing = true;                                // kick off the "magic working" scratch FX
       fetch(this.falEndpoint, {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -164,20 +159,68 @@
         .then(function (out) {
           if (!out || !out.sprite_b64) throw new Error((out && out.error) || 'no sprite in response');
           if (prop.enhanced) { prop._enhancing = false; return; }   // CAELLUM polish already applied -> keep it
-          // the sprite is already a TRANSPARENT PNG (background removed server-side by BiRefNet), so
-          // there's no client-side cutout work — just swap it straight in. No render-thread stall.
+          // the server returns the RAW generated image — isolate the drawn object (drop the plain
+          // background AND the stray decoration blobs the generator scatters around it), then swap in.
+          self._isolateDoodle(dataUrlFor(out.sprite_b64)).then(function (clean) {
+          if (prop.enhanced) return;
           const sprite = new Image();
           sprite.onload = function () {
             if (prop.enhanced) return;
             prop.sprite = sprite; prop._falDone = true;
             prop._enhancing = false; prop._revealT = 0;      // stop the FX, play the reveal pop
           };
-          sprite.src = 'data:image/png;base64,' + out.sprite_b64;
+          sprite.src = clean;
+          });
         })
         .catch(function (e) {
           prop._enhancing = false;                           // stop the FX; the kid's drawing stays as-is
           if (global.__showErr) global.__showErr('fal enhance failed: ' + (e && e.message || e));
         });
+    },
+
+    // isolate the drawn object: keep only the LARGEST connected shape, turning the plain background
+    // AND any detached decoration blobs (the generator scatters them around) fully transparent.
+    // Returns a transparent PNG dataURL. Fast pure-JS connected-components — NOT an ML model, so it
+    // runs in ~tens of ms and never stalls the render loop (unlike @imgly). This is the cutout now.
+    _isolateDoodle: function (dataUrl) {
+      return new Promise(function (resolve) {
+        const img = new Image();
+        img.onerror = function () { resolve(dataUrl); };
+        img.onload = function () {
+          const ow = img.naturalWidth || img.width, oh = img.naturalHeight || img.height;
+          if (!ow || !oh) { resolve(dataUrl); return; }
+          const scale = Math.min(1, 640 / Math.max(ow, oh));   // cap so the components pass stays ~ms
+          const W = Math.max(1, Math.round(ow * scale)), H = Math.max(1, Math.round(oh * scale));
+          const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+          const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0, W, H);
+          let id; try { id = ctx.getImageData(0, 0, W, H); } catch (e) { resolve(dataUrl); return; }
+          const d = id.data, N = W * H, ink = new Uint8Array(N);
+          for (let i = 0; i < N; i++) {                       // ink = opaque AND not near-white
+            const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2], a = d[i * 4 + 3];
+            const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+            if (a > 20 && !(mx > 238 && (mx - mn) < 16)) ink[i] = 1;
+          }
+          const comp = new Int32Array(N).fill(-1), sizes = [], st = [];
+          for (let s = 0; s < N; s++) {                       // label connected components (4-conn)
+            if (!ink[s] || comp[s] >= 0) continue;
+            const cid = sizes.length; let sz = 0; st.length = 0; st.push(s); comp[s] = cid;
+            while (st.length) {
+              const i = st.pop(); sz++; const x = i % W, y = (i / W) | 0;
+              if (x > 0 && ink[i - 1] && comp[i - 1] < 0) { comp[i - 1] = cid; st.push(i - 1); }
+              if (x < W - 1 && ink[i + 1] && comp[i + 1] < 0) { comp[i + 1] = cid; st.push(i + 1); }
+              if (y > 0 && ink[i - W] && comp[i - W] < 0) { comp[i - W] = cid; st.push(i - W); }
+              if (y < H - 1 && ink[i + W] && comp[i + W] < 0) { comp[i + W] = cid; st.push(i + W); }
+            }
+            sizes.push(sz);
+          }
+          if (!sizes.length) { resolve(dataUrl); return; }     // nothing found -> leave as-is
+          let best = 0; for (let c = 1; c < sizes.length; c++) if (sizes[c] > sizes[best]) best = c;
+          for (let i = 0; i < N; i++) if (comp[i] !== best) d[i * 4 + 3] = 0;   // keep only the main shape
+          ctx.putImageData(id, 0, 0);
+          resolve(cv.toDataURL('image/png'));
+        };
+        img.src = dataUrl;
+      });
     },
 
     // remove a generated sprite's background -> a transparent PNG URL (Promise). Uses the @imgly ML
@@ -430,6 +473,13 @@
     return null; // unknown node: keep the prop's default mechanic
   }
   function stripDataUrl(u) { const i = u.indexOf(','); return i >= 0 ? u.slice(i + 1) : u; }
+  // base64 image bytes -> a data URL with the right MIME (Recraft returns WebP; sniff so <img> decodes it).
+  function dataUrlFor(b64) {
+    const h = (b64 || '').slice(0, 12);
+    const mime = h.indexOf('iVBOR') === 0 ? 'image/png' : h.indexOf('/9j/') === 0 ? 'image/jpeg'
+      : h.indexOf('UklGR') === 0 ? 'image/webp' : 'image/png';
+    return 'data:' + mime + ';base64,' + b64;
+  }
   function bbox(strokes) {
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (const s of (strokes || [])) for (const p of s.pts) {

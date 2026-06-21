@@ -30,7 +30,12 @@ const MAX_PLAYERS = 6;
 // following its shape) -> BiRefNet background removal (a real ML cutout, run SERVER-SIDE so it never
 // stalls the browser render loop) -> transparent PNG. Set FAL_PIPELINE=sdxl for the old canny path.
 const FAL_PIPELINE = (process.env.FAL_PIPELINE || 'recraft').toLowerCase();
-const FAL_GEN_MODEL = 'fal-ai/recraft/v3/image-to-image';
+// 'text' (default): generate a CLEAN game icon FROM the recognized label — ignore the doodle's shape
+// entirely (this is what gives a real game-asset look). 'image': image-to-image (traces the doodle —
+// only recolors it; kept for comparison via FAL_GEN_MODE=image).
+const FAL_GEN_MODE = (process.env.FAL_GEN_MODE || 'text').toLowerCase();
+const FAL_GEN_MODEL_T2I = 'fal-ai/recraft/v3/text-to-image';
+const FAL_GEN_MODEL_I2I = 'fal-ai/recraft/v3/image-to-image';
 const FAL_RMBG_MODEL = 'fal-ai/birefnet/v2';
 // Recraft style + how far it may stray from the kid's drawing (0 = identical .. 1 = ignore it).
 // digital_illustration/hand_drawn fits the doodle world; vector_illustration/bold_stroke is flatter.
@@ -84,11 +89,10 @@ function openaiKey() {
 // Recraft target prompt — the STYLE param carries the look, so the prompt just names the subject
 // and asks for a clean, single, game-ready sprite.
 function recraftPrompt(label) {
-  return `a ${label} as a polished fully-colored 2D game item sprite — vibrant saturated colors, ` +
-    `clean bold outline, soft shading, single centered object on a plain white background. ` +
-    `The WHOLE object is fully visible with a small margin, zoomed out, not cropped, not touching the edges. ` +
-    `NOT a black-and-white silhouette, NOT a plain line drawing — richly colored like a real game asset. ` +
-    `No text, no sparkles, no decorations, no background scenery.`;
+  return `a clean, well-drawn hand-drawn doodle of a ${label} — confident tidy ink linework, ` +
+    `neat and crisp, simple flat colors, like a polished sketch by a skilled artist. ` +
+    `Single centered object, whole object fully visible with margin (not cropped), ` +
+    `plain solid white background, clean edges, no text, no background, no scenery.`;
 }
 // Legacy SDXL prompt (FAL_PIPELINE=sdxl).
 function falPrompt(label) {
@@ -175,24 +179,24 @@ async function falEnhance(req, res) {
         image_size: 'square', num_images: 1, enable_safety_checker: false,
       }, key, ctrl.signal);
       genUrl = out && out.images && out.images[0] && out.images[0].url;
-    } else {
-      const out = await falPost(FAL_GEN_MODEL, {
+    } else if (FAL_GEN_MODE === 'image') {
+      const out = await falPost(FAL_GEN_MODEL_I2I, {
         image_url: dataUri, prompt: recraftPrompt(label), strength: FAL_STRENGTH, style: FAL_STYLE,
+      }, key, ctrl.signal);
+      genUrl = out && out.images && out.images[0] && out.images[0].url;
+    } else {
+      // text-to-image: a clean game icon FROM the label, ignoring the doodle's shape (the good-looking path)
+      const out = await falPost(FAL_GEN_MODEL_T2I, {
+        prompt: recraftPrompt(label), style: FAL_STYLE, image_size: 'square_hd',
       }, key, ctrl.signal);
       genUrl = out && out.images && out.images[0] && out.images[0].url;
     }
     if (!genUrl) return sendJson(res, 502, { error: 'fal returned no image' });
 
-    // --- stage 2: background removal (server-side, best-effort) ---
-    let spriteUrl = genUrl;
-    try {
-      const cut = await falPost(FAL_RMBG_MODEL, {
-        image_url: genUrl, output_format: 'png', refine_foreground: true,
-      }, key, ctrl.signal);
-      if (cut && cut.image && cut.image.url) spriteUrl = cut.image.url;
-    } catch (e) { /* keep the un-cut sprite rather than failing the whole enhance */ }
-
-    const sprite_b64 = await fetchB64(spriteUrl, ctrl.signal);
+    // Return the RAW generated image. The CLIENT isolates the object (drops the plain background AND
+    // the stray decoration blobs Recraft scatters around it) with a fast connected-components pass —
+    // BiRefNet's salient-object cutout grabbed the wrong region on thin-lined doodles, so it's gone.
+    const sprite_b64 = await fetchB64(genUrl, ctrl.signal);
     return sendJson(res, 200, { sprite_b64 });
   } catch (e) {
     if (e && e.name === 'AbortError') return sendJson(res, 504, { error: 'fal request timed out' });
