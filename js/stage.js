@@ -12,6 +12,9 @@
   // inked outlines stay pure ink. Keep the mix amounts tiny.
   const TINT_EARTH = D.mix(D.COL.paper, '#7a5230', 0.10); // platform body — a touch brown (below the line)
   const TINT_BRICK = D.mix(D.COL.paper, '#a8432c', 0.12); // brick / stone — a touch red
+  // authored decor (trees/flowers/bushes/…) reads as soft midground, NOT the hard charcoal of the
+  // platforms/fighters — lightened toward paper so it recedes a little. Accent pops stay as-is.
+  const DECOR_INK = D.mix(D.COL.ink, D.COL.paper, 0.36);
 
   // ---- platforms -----------------------------------------------------------
   // dispatch on p.kind; default is ground (solid) / float (pass-through). A stable
@@ -378,12 +381,12 @@
 
   function flower(ctx, x, y, sx, sy) {
     const rnd = DS.makeRng(DS.hashSeed('f' + (sx || x) + (sy || y)));
-    D.curve(ctx, [[x, y], [x - 3, y - 22], [x + 1, y - 40]], { width: 4, color: D.COL.ink, rnd, passes: 1 });
-    D.line(ctx, x - 2, y - 18, x - 12, y - 26, { width: 3.5, color: D.COL.ink, rnd, passes: 1 });
+    D.curve(ctx, [[x, y], [x - 3, y - 22], [x + 1, y - 40]], { width: 4, color: DECOR_INK, rnd, passes: 1 });
+    D.line(ctx, x - 2, y - 18, x - 12, y - 26, { width: 3.5, color: DECOR_INK, rnd, passes: 1 });
     const cx = x + 1, cy = y - 44;
     for (let i = 0; i < 5; i++) {
       const a = (i / 5) * 6.283 - 1.2;
-      D.circle(ctx, cx + Math.cos(a) * 9, cy + Math.sin(a) * 9, 6, { width: 3.5, color: D.COL.ink, rnd });
+      D.circle(ctx, cx + Math.cos(a) * 9, cy + Math.sin(a) * 9, 6, { width: 3.5, color: DECOR_INK, rnd });
     }
     D.circle(ctx, cx, cy, 5, { width: 3.5, color: D.COL.accent, rnd });
   }
@@ -391,7 +394,7 @@
   function grass(ctx, x, y, sx, sy) {
     const rnd = DS.makeRng(DS.hashSeed('g' + (sx || x) + (sy || y)));
     for (let i = -1; i <= 1; i++) {
-      D.curve(ctx, [[x + i * 7, y], [x + i * 10, y - 14], [x + i * 16, y - 22]], { width: 3.5, color: D.COL.ink, rnd, passes: 1 });
+      D.curve(ctx, [[x + i * 7, y], [x + i * 10, y - 14], [x + i * 16, y - 22]], { width: 3.5, color: DECOR_INK, rnd, passes: 1 });
     }
   }
 
@@ -405,27 +408,27 @@
       pts.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.7]);
     }
     pts.push([x + 30, y]); pts.push([x - 30, y]);
-    D.strokePts(ctx, pts, { width: 4.5, color: D.COL.ink, rnd, closed: true, fill: D.COL.paper });
+    D.strokePts(ctx, pts, { width: 4.5, color: DECOR_INK, rnd, closed: true, fill: D.COL.paper });
   }
 
   // leafy round tree
   function tree(ctx, x, y, sx, sy) {
     const rnd = DS.makeRng(DS.hashSeed('t' + (sx || x) + (sy || y)));
     // trunk
-    D.strokePts(ctx, [[x - 10, y], [x - 7, y - 60], [x + 7, y - 60], [x + 10, y]], { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
-    D.line(ctx, x, y - 8, x, y - 56, { width: 2, color: D.COL.ink, passes: 1, alpha: 0.4 });
+    D.strokePts(ctx, [[x - 10, y], [x - 7, y - 60], [x + 7, y - 60], [x + 10, y]], { width: 5, color: DECOR_INK, rnd, fill: D.COL.paper, passes: 1 });
+    D.line(ctx, x, y - 8, x, y - 56, { width: 2, color: DECOR_INK, passes: 1, alpha: 0.4 });
     // canopy: overlapping blobs
     const blobs = [[-34, -78, 34], [22, -88, 36], [0, -108, 40], [-20, -120, 30], [30, -116, 28]];
-    for (const [bx, by, br] of blobs) D.circle(ctx, x + bx, y + by, br, { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper, wob: 2 });
+    for (const [bx, by, br] of blobs) D.circle(ctx, x + bx, y + by, br, { width: 5, color: DECOR_INK, rnd, fill: D.COL.paper, wob: 2 });
   }
 
   // pointy pine
   function pine(ctx, x, y, sx, sy) {
     const rnd = DS.makeRng(DS.hashSeed('pi' + (sx || x) + (sy || y)));
-    D.strokePts(ctx, [[x - 6, y], [x - 5, y - 30], [x + 5, y - 30], [x + 6, y]], { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
+    D.strokePts(ctx, [[x - 6, y], [x - 5, y - 30], [x + 5, y - 30], [x + 6, y]], { width: 5, color: DECOR_INK, rnd, fill: D.COL.paper, passes: 1 });
     const tiers = [[40, 36, -26], [34, 28, -54], [24, 22, -78]];
     for (const [w, h, ty] of tiers) {
-      D.strokePts(ctx, [[x - w, y + ty], [x, y + ty - h], [x + w, y + ty]], { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
+      D.strokePts(ctx, [[x - w, y + ty], [x, y + ty - h], [x + w, y + ty]], { width: 5, color: DECOR_INK, rnd, fill: D.COL.paper, passes: 1 });
     }
   }
 
@@ -436,11 +439,11 @@
     for (const [mx, my, ms] of caps) {
       // stem
       D.strokePts(ctx, [[x + mx - 6 * ms, y + my], [x + mx - 5 * ms, y + my - 18 * ms], [x + mx + 5 * ms, y + my - 18 * ms], [x + mx + 6 * ms, y + my]],
-        { width: 4, color: D.COL.ink, rnd, fill: D.COL.paper, passes: 1 });
+        { width: 4, color: DECOR_INK, rnd, fill: D.COL.paper, passes: 1 });
       // cap
       const cy = y + my - 18 * ms, cw = 20 * ms;
       D.strokePts(ctx, [[x + mx - cw, cy], [x + mx - cw * 0.6, cy - 14 * ms], [x + mx, cy - 17 * ms], [x + mx + cw * 0.6, cy - 14 * ms], [x + mx + cw, cy]],
-        { width: 4, color: D.COL.ink, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+        { width: 4, color: DECOR_INK, rnd, closed: true, fill: D.COL.paper, passes: 1 });
       ctx.fillStyle = D.COL.accent; ctx.globalAlpha = 0.8;
       ctx.beginPath(); ctx.arc(x + mx - 5 * ms, cy - 8 * ms, 2.4 * ms, 0, 7); ctx.fill();
       ctx.beginPath(); ctx.arc(x + mx + 5 * ms, cy - 6 * ms, 2 * ms, 0, 7); ctx.fill();
@@ -453,8 +456,8 @@
     const rnd = DS.makeRng(DS.hashSeed('rd' + (sx || x) + (sy || y)));
     for (let i = -2; i <= 2; i++) {
       const bx = x + i * 9, bend = i * 6;
-      D.curve(ctx, [[bx, y], [bx + bend * 0.5, y - 30], [bx + bend, y - 56]], { width: 3.5, color: D.COL.ink, rnd, passes: 1 });
-      if (i % 2 === 0) { ctx.fillStyle = D.COL.ink; ctx.beginPath(); ctx.ellipse(bx + bend, y - 60, 4, 9, 0, 0, 7); ctx.fill(); }
+      D.curve(ctx, [[bx, y], [bx + bend * 0.5, y - 30], [bx + bend, y - 56]], { width: 3.5, color: DECOR_INK, rnd, passes: 1 });
+      if (i % 2 === 0) { ctx.fillStyle = DECOR_INK; ctx.beginPath(); ctx.ellipse(bx + bend, y - 60, 4, 9, 0, 0, 7); ctx.fill(); }
     }
   }
 
@@ -463,11 +466,11 @@
     const rnd = DS.makeRng(DS.hashSeed('v' + (sx || x) + (sy || y)));
     const len = 90, pts = [];
     for (let i = 0; i <= 6; i++) { const t = i / 6; pts.push([x + Math.sin(t * 6) * 8, y + t * len]); }
-    D.strokePts(ctx, pts, { width: 3.5, color: D.COL.ink, rnd, passes: 1 });
+    D.strokePts(ctx, pts, { width: 3.5, color: DECOR_INK, rnd, passes: 1 });
     for (let i = 1; i <= 5; i++) {
       const t = i / 6, lx = x + Math.sin(t * 6) * 8, ly = y + t * len;
       D.strokePts(ctx, [[lx, ly], [lx + (i % 2 ? 14 : -14), ly - 4], [lx + (i % 2 ? 10 : -10), ly + 8]],
-        { width: 3, color: D.COL.ink, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+        { width: 3, color: DECOR_INK, rnd, closed: true, fill: D.COL.paper, passes: 1 });
     }
   }
 
