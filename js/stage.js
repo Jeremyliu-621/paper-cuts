@@ -742,18 +742,11 @@
       // everything anchors to the platform's real underside CONTOUR, so it follows a tilt/curve.
       if (!isBase) {
         const contour = undersideContour(p);
-        // pour a WATERFALL from an edge at world x down to the grounded surface far below (if any), with mist
-        const maybeFall = (x, sd) => {
-          const u = undersideAt(contour, x), ey = u ? u.y : pb;
-          const s = surfaceBelow(plats, x, ey + 6, p, grounded);
-          if (s && s.y - ey > 220 && DS.makeRng(sd)() < 0.5 * Math.min(1.2, density)) behind.push({ t: 'waterfall', x, y0: ey, y1: s.y, seed: sd });
-        };
         const sp = supportSpan(plats, p, grounded);
         if (!sp) {
           // truly floating → a jagged island that follows the (possibly tilted) underside + foliage
           behind.push({ t: 'island', top: undersideStrip(contour, p.x, pr), depth: Math.min(150, Math.max(46, p.w * 0.4)), seed: seed + 1 });
           addHang(front, contour, p.x + p.w * 0.28, p.x + p.w * 0.72, density, seed + 2);
-          if (density >= 0.6) maybeFall(p.x + p.w * (DS.makeRng(seed + 8)() < 0.5 ? 0.3 : 0.7), seed + 560);
         } else {
           const l = Math.max(p.x, sp.l), r = Math.min(pr, sp.r), span = r - l;
           const pillars = []; // collect pillars (to add a buttress to a tall lone one afterwards)
@@ -821,8 +814,8 @@
             }
           }
           // overhangs → a jagged island edge (and foliage) on each jutting side, following the underside
-          if (l - p.x > 50) { behind.push({ t: 'island', top: undersideStrip(contour, p.x, l + 8), depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, contour, p.x + 8, l - 8, density, seed + 32); maybeFall(p.x + (l - p.x) * 0.5, seed + 520); }
-          if (pr - r > 50) { behind.push({ t: 'island', top: undersideStrip(contour, r - 8, pr), depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, contour, r + 8, pr - 8, density, seed + 42); maybeFall(r + (pr - r) * 0.5, seed + 540); }
+          if (l - p.x > 50) { behind.push({ t: 'island', top: undersideStrip(contour, p.x, l + 8), depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, contour, p.x + 8, l - 8, density, seed + 32); }
+          if (pr - r > 50) { behind.push({ t: 'island', top: undersideStrip(contour, r - 8, pr), depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, contour, r + 8, pr - 8, density, seed + 42); }
         }
       }
       // ---- stuff ON TOP, sitting on the real surface and tilting with it ----
@@ -833,11 +826,11 @@
         // a little hilltop HAMLET: cottages perch on the highest wide, flat, elevated tops
         const isTown = !isBase && flatTop && p.w >= 240 && p.y <= townY + 150 && density >= 0.5;
         if (isTown) {
-          const houses = Math.max(1, Math.min(3, Math.round(p.w / 320)));
+          const houses = Math.max(1, Math.min(3, Math.round(p.w / 380)));
           for (let i = 0; i < houses; i++) {
             const r3 = DS.makeRng(seed + 600 + i * 17);
-            const hx = p.x + p.w * ((i + 0.5) / houses) + r3.sym(p.w * 0.10), ta = topAt(topC, hx);
-            front.push({ t: 'house', x: hx, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, s: 0.92 + r3() * 0.34, seed: seed + 600 + i });
+            const hx = p.x + p.w * ((i + 0.5) / houses) + r3.sym(p.w * 0.08), ta = topAt(topC, hx);
+            front.push({ t: 'house', x: hx, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, s: 1.3 + r3() * 0.5, seed: seed + 600 + i });
           }
         }
         // a few varied plants — fewer when houses already crowd the roof
@@ -846,11 +839,6 @@
           const r2 = DS.makeRng(seed + 700 + i * 29);
           const x = p.x + 32 + (p.w - 64) * r2(), ta = topAt(topC, x);
           front.push({ t: 'plant', x, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, kind: pick(r2, isBase ? TOP_KINDS_BIG : TOP_KINDS), s: 0.76 + r2() * 0.5, seed: seed + 700 + i });
-        }
-        // a still POND on a wide flat top now and then (not where a hamlet already sits)
-        if (!isTown && flatTop && p.w >= 320 && density >= 0.6 && DS.makeRng(seed + 940)() < 0.3) {
-          const px2 = p.x + p.w * (0.32 + 0.36 * DS.makeRng(seed + 941)()), ta = topAt(topC, px2);
-          front.push({ t: 'pond', x: px2, y: ta ? ta.y : p.y, w: Math.min(150, p.w * 0.3), seed: seed + 942 });
         }
         // a low railing along a wide, roughly-flat top (some of them) — reads as a balcony/parapet
         if (p.w > 300 && !isTown && density >= 0.6 && flatTop && DS.makeRng(seed + 900)() < 0.5) {
@@ -997,40 +985,25 @@
       { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
   }
 
-  // a waterfall spilling from a high edge (x,y0) to the surface below (y1): a few wavering streaks
-  // with a puff of mist where it pours over the lip and where it lands.
-  function drawWaterfall(ctx, it) {
-    const rnd = DS.makeRng(it.seed), x = it.x, y0 = it.y0, y1 = it.y1, h = y1 - y0;
-    ctx.globalAlpha = 0.55;
-    for (let i = -2; i <= 2; i++) {
-      const pts = [];
-      for (let k = 0; k <= 10; k++) { const t = k / 10; pts.push([x + i * 7 + Math.sin(t * 7 + i) * 3, y0 + t * h]); }
-      D.strokePts(ctx, pts, { width: 2.4, color: SCN, passes: 1 });
-    }
-    ctx.globalAlpha = 1;
-    for (let i = -2; i <= 2; i++) D.circle(ctx, x + i * 9, y1 - 2, 6 + rnd() * 3, { width: 2, color: SCN, rnd, fill: D.COL.paper }); // splash pool
-    for (let i = -1; i <= 1; i++) D.circle(ctx, x + i * 8, y0, 5 + rnd() * 2, { width: 2, color: SCN, rnd, fill: D.COL.paper }); // lip spray
-  }
-
   function drawDressBehind(ctx, it) {
     if (it.t === 'pillar') drawPillar(ctx, it);
     else if (it.t === 'island') drawIsland(ctx, it);
     else if (it.t === 'arch') drawArch(ctx, it);
     else if (it.t === 'buttress') drawButtress(ctx, it);
-    else if (it.t === 'waterfall') drawWaterfall(ctx, it);
   }
-  // a little cottage perched on a roof surface: body + pitched roof + chimney, a door and a window.
+  // a cottage perched on a roof surface: body + pitched roof + chimney, a door and a window.
+  // dimensions scale off bw/bh so the whole house grows with `it.s` cleanly.
   function drawHouse(ctx, it) {
     const rnd = DS.makeRng(it.seed), s = it.s || 1, flip = rnd() < 0.5 ? 1 : -1;
     ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.tilt || 0); ctx.scale(s * flip, s);
-    const bw = 38, bh = 28, eave = -bh, peak = eave - 20, midRoof = (eave + peak) / 2;
-    D.strokePts(ctx, [[-bw / 2, 0], [-bw / 2, eave], [bw / 2, eave], [bw / 2, 0]], { width: 3, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // body
-    D.strokePts(ctx, [[-bw / 2 - 4, eave], [0, peak], [bw / 2 + 4, eave]], { width: 3.2, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // gable roof
-    D.strokePts(ctx, [[bw * 0.2, midRoof + 1], [bw * 0.2, peak - 5], [bw * 0.32, peak - 5], [bw * 0.32, midRoof - 3]], { width: 2.4, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // chimney
-    D.strokePts(ctx, [[-9, 0], [-9, -12], [-3, -12], [-3, 0]], { width: 2.2, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // door
-    const wx = 6, wy = -13; // window with a little cross
-    D.strokePts(ctx, [[wx - 4, wy - 4], [wx + 4, wy - 4], [wx + 4, wy + 4], [wx - 4, wy + 4]], { width: 2, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
-    D.line(ctx, wx, wy - 4, wx, wy + 4, { width: 1.4, color: SCN, passes: 1 }); D.line(ctx, wx - 4, wy, wx + 4, wy, { width: 1.4, color: SCN, passes: 1 });
+    const bw = 64, bh = 48, eave = -bh, peak = eave - 32, midRoof = (eave + peak) / 2;
+    D.strokePts(ctx, [[-bw / 2, 0], [-bw / 2, eave], [bw / 2, eave], [bw / 2, 0]], { width: 3.4, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // body
+    D.strokePts(ctx, [[-bw / 2 - 7, eave], [0, peak], [bw / 2 + 7, eave]], { width: 3.6, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // gable roof
+    D.strokePts(ctx, [[bw * 0.22, midRoof + 2], [bw * 0.22, peak - 8], [bw * 0.34, peak - 8], [bw * 0.34, midRoof - 5]], { width: 2.8, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // chimney
+    D.strokePts(ctx, [[-bw * 0.30, 0], [-bw * 0.30, -bh * 0.56], [-bw * 0.12, -bh * 0.56], [-bw * 0.12, 0]], { width: 2.6, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // door
+    const wx = bw * 0.20, wy = -bh * 0.58, ww = bw * 0.13; // window with a little cross
+    D.strokePts(ctx, [[wx - ww, wy - ww], [wx + ww, wy - ww], [wx + ww, wy + ww], [wx - ww, wy + ww]], { width: 2.2, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    D.line(ctx, wx, wy - ww, wx, wy + ww, { width: 1.6, color: SCN, passes: 1 }); D.line(ctx, wx - ww, wy, wx + ww, wy, { width: 1.6, color: SCN, passes: 1 });
     ctx.restore();
   }
   // festive bunting: a sagging cord between two points hung with little triangular flags.
@@ -1044,14 +1017,6 @@
       const t = i / flags, cx = x0 + dx * t, cy = y0 + (y1 - y0) * t + Math.sin(t * Math.PI) * sag;
       D.strokePts(ctx, [[cx - 5, cy], [cx + 5, cy], [cx, cy + 10]], { width: 1.8, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
     }
-  }
-  // a still pond resting on a flat top: a soft basin outline with a couple of ripple lines.
-  function drawPond(ctx, it) {
-    const rnd = DS.makeRng(it.seed), x = it.x, y = it.y - 1, rx = it.w / 2, ry = Math.max(6, it.w * 0.07);
-    D.ellipse(ctx, x, y, rx, ry, { width: 2.4, color: SCN, rnd, fill: D.COL.paper, wob: 1 });
-    ctx.globalAlpha = 0.5;
-    for (let i = 0; i < 2; i++) D.wavy(ctx, x - rx * 0.55, x + rx * 0.55, y - 1 + i * 3, { amp: 1.4, wavelen: 16, width: 1.5, color: SCN, passes: 1 });
-    ctx.globalAlpha = 1;
   }
   // ivy climbing up a pillar, with little leaves
   function drawIvy(ctx, it) {
@@ -1099,7 +1064,6 @@
     else if (it.t === 'bridge') drawBridge(ctx, it);
     else if (it.t === 'house') drawHouse(ctx, it);
     else if (it.t === 'bunting') drawBunting(ctx, it);
-    else if (it.t === 'pond') drawPond(ctx, it);
   }
 
   // compute (and cache) the derived dressing for a stage. Key = density + every platform's box, so
@@ -1226,7 +1190,8 @@
     const st = stageOf(data);
     const b = st.bounds || { x0: 0, y0: 0, x1: DS.VIEW.w, y1: DS.VIEW.h };
     const cx = cam && cam.cx, hx = home && home.x;
-    const horizon = st.bounds ? b.y0 + (b.y1 - b.y0) * 0.60 : DS.VIEW.h * 0.64;
+    const BG_DROP = 110; // nudge the whole backdrop down a bit
+    const horizon = (st.bounds ? b.y0 + (b.y1 - b.y0) * 0.60 : DS.VIEW.h * 0.64) + BG_DROP;
     const top = (st.bounds ? b.y0 : 0) - 2400;
 
     // sky tint — a subtle vertical gradient fading to the cream paper at the horizon
