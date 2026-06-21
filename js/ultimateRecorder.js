@@ -11,15 +11,26 @@
   const STATUS = {
     camera: 'camera needed',
     tracking: 'tracking',
+    align: 'align skeleton',
+    countdown: 'recording countdown',
+    locked: 'skeleton locked',
     recording: 'recording',
     generating: 'generating',
     ready: 'custom ultimate ready',
+    unavailable: 'camera unavailable',
     failed: 'failed',
     fallback: 'using default',
   };
   const IDX = {
     nose: 0, lSh: 11, rSh: 12, lEl: 13, rEl: 14, lWr: 15, rWr: 16, lHip: 23, rHip: 24,
   };
+  const REQUIRED_LANDMARKS = [IDX.nose, IDX.lSh, IDX.rSh, IDX.lEl, IDX.rEl, IDX.lWr, IDX.rWr, IDX.lHip, IDX.rHip];
+  const SKELETON_EDGES = [
+    [IDX.lSh, IDX.rSh], [IDX.lSh, IDX.lHip], [IDX.rSh, IDX.rHip], [IDX.lHip, IDX.rHip],
+    [IDX.lSh, IDX.lEl], [IDX.lEl, IDX.lWr], [IDX.rSh, IDX.rEl], [IDX.rEl, IDX.rWr],
+  ];
+  const GUIDE = { cx: 0.5, shY: 0.3, hipY: 0.58, shoulder: 0.28, hip: 0.2, armDrop: 0.18 };
+  const ALIGN_COUNTDOWN_MS = 2600;
 
   let video = null;
   let stream = null;
@@ -41,6 +52,10 @@
   let prevWrists = null;
   let currentPose = null;
   let currentLandmarks = null;
+  let trackingQuality = null;
+  let alignCountdownMs = 0;
+  let lastAlignAt = 0;
+  let pendingRecord = null;
   let impactT = 0;
   let recording = null;
   const states = [];
@@ -48,8 +63,14 @@
   let onChange = null;
 
   function setState(playerIndex, state, error) {
-    states[playerIndex] = { state, error: error || null, updatedAt: new Date().toISOString() };
-    if (statusEl && playerIndex === activePlayer) statusEl.textContent = error ? state + ' - ' + error : state;
+    const nextError = error || null;
+    const prev = states[playerIndex];
+    if (prev && prev.state === state && prev.error === nextError) {
+      if (statusEl && playerIndex === activePlayer) statusEl.textContent = nextError ? state + ' - ' + nextError : state;
+      return;
+    }
+    states[playerIndex] = { state, error: nextError, updatedAt: new Date().toISOString() };
+    if (statusEl && playerIndex === activePlayer) statusEl.textContent = nextError ? state + ' - ' + nextError : state;
     if (onChange) onChange(playerIndex, states[playerIndex]);
   }
 
@@ -82,6 +103,12 @@
   }
 
   function hideOverlay() {
+    if (pendingRecord) {
+      pendingRecord.reject(new Error('recording cancelled'));
+      pendingRecord = null;
+    }
+    alignCountdownMs = 0;
+    lastAlignAt = 0;
     if (overlay) overlay.hidden = true;
   }
 
@@ -146,7 +173,7 @@
             if (!landmarker || !bitmap) return;
             const result = landmarker.detectForVideo(bitmap, data.timestamp || performance.now());
             const points = result && result.landmarks && result.landmarks[0]
-              ? result.landmarks[0].map((p) => ({ x: p.x, y: p.y, z: p.z || 0 }))
+              ? result.landmarks[0].map((p) => ({ x: p.x, y: p.y, z: p.z || 0, visibility: p.visibility == null ? 1 : p.visibility, presence: p.presence == null ? 1 : p.presence }))
               : null;
             if (bitmap.close) bitmap.close();
             self.postMessage({ type: 'landmarks', landmarks: points });
@@ -166,7 +193,7 @@
         if (data.type === 'ready') { workerReady = true; return; }
         if (data.type === 'landmarks') {
           workerBusy = false;
-          if (data.landmarks && data.landmarks.length) currentLandmarks = smoothLandmarks(data.landmarks);
+          currentLandmarks = data.landmarks && data.landmarks.length ? smoothLandmarks(data.landmarks) : null;
           return;
         }
         if (data.type === 'error') failWorker(data.message);
@@ -200,6 +227,18 @@
     contexts[playerIndex] = Object.assign({}, contexts[playerIndex] || {}, context || {});
   }
 
+  function requestCameraStream(constraints) {
+    const nav = global.navigator || {};
+    if (nav.mediaDevices && typeof nav.mediaDevices.getUserMedia === 'function') {
+      return nav.mediaDevices.getUserMedia(constraints);
+    }
+    const legacy = nav.getUserMedia || nav.webkitGetUserMedia || nav.mozGetUserMedia || nav.msGetUserMedia;
+    if (typeof legacy === 'function') {
+      return new Promise((resolve, reject) => legacy.call(nav, constraints, resolve, reject));
+    }
+    return Promise.resolve(null);
+  }
+
   async function startCamera(playerIndex) {
     ensureOverlay();
     activePlayer = playerIndex || 0;
@@ -213,17 +252,34 @@
     }
     try {
       if (!stream) {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+        stream = await requestCameraStream({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+        if (!stream) {
+          setState(activePlayer, STATUS.unavailable, global.isSecureContext === false ? 'use localhost or https' : 'browser blocked camera API');
+          updateActionButton();
+          startLoop();
+          return false;
+        }
         video.srcObject = stream;
       }
       await video.play();
+      alignCountdownMs = 0;
+      lastAlignAt = 0;
+      trackingQuality = null;
+      currentLandmarks = null;
+      smooth = null;
       setState(activePlayer, STATUS.tracking);
       if (!startPoseWorker()) loadPoseLandmarker();
       startLoop();
       return true;
     } catch (error) {
-      setState(activePlayer, STATUS.fallback, 'camera denied');
-      throw error;
+      const name = error && error.name ? error.name : '';
+      const message = name === 'NotAllowedError' || name === 'PermissionDeniedError'
+        ? 'permission denied'
+        : (error && error.message ? error.message : 'camera unavailable');
+      setState(activePlayer, STATUS.unavailable, message);
+      updateActionButton();
+      startLoop();
+      return false;
     }
   }
 
@@ -254,21 +310,25 @@
       try {
         const result = landmarker.detectForVideo(video, performance.now());
         const lm = result && result.landmarks && result.landmarks[0];
-        if (lm && lm.length) currentLandmarks = smoothLandmarks(lm);
+        currentLandmarks = lm && lm.length ? smoothLandmarks(lm) : null;
       } catch (_error) {
         // Keep the latest pose; camera preview should not crash the lobby.
       }
     }
+    trackingQuality = assessTracking(currentLandmarks);
+    updateAlignmentGate();
     currentPose = poseFromLandmarks(currentLandmarks, contexts[activePlayer] || {});
   }
 
   function smoothLandmarks(lm) {
     const alpha = 0.36;
-    if (!smooth) smooth = lm.map((p) => ({ x: p.x, y: p.y, z: p.z || 0 }));
+    if (!smooth) smooth = lm.map((p) => ({ x: p.x, y: p.y, z: p.z || 0, visibility: p.visibility == null ? 1 : p.visibility, presence: p.presence == null ? 1 : p.presence }));
     for (let i = 0; i < lm.length; i++) {
       smooth[i].x += (lm[i].x - smooth[i].x) * alpha;
       smooth[i].y += (lm[i].y - smooth[i].y) * alpha;
       smooth[i].z += ((lm[i].z || 0) - smooth[i].z) * alpha;
+      smooth[i].visibility = lm[i].visibility == null ? 1 : lm[i].visibility;
+      smooth[i].presence = lm[i].presence == null ? 1 : lm[i].presence;
     }
     return smooth;
   }
@@ -290,6 +350,99 @@
 
   function clamp(v, a, b) {
     return Math.max(a, Math.min(b, v));
+  }
+
+  function landmarkVisible(p) {
+    if (!p) return false;
+    const visibility = p.visibility == null ? 1 : p.visibility;
+    const presence = p.presence == null ? 1 : p.presence;
+    return visibility >= 0.58 && presence >= 0.58 && p.x > 0.03 && p.x < 0.97 && p.y > 0.03 && p.y < 0.98;
+  }
+
+  function guidePoints() {
+    const cx = GUIDE.cx, shY = GUIDE.shY, hipY = GUIDE.hipY;
+    return {
+      nose: { x: cx, y: shY - 0.18 },
+      lSh: { x: cx - GUIDE.shoulder / 2, y: shY },
+      rSh: { x: cx + GUIDE.shoulder / 2, y: shY },
+      lHip: { x: cx - GUIDE.hip / 2, y: hipY },
+      rHip: { x: cx + GUIDE.hip / 2, y: hipY },
+      lEl: { x: cx - GUIDE.shoulder / 2 - 0.08, y: shY + GUIDE.armDrop },
+      rEl: { x: cx + GUIDE.shoulder / 2 + 0.08, y: shY + GUIDE.armDrop },
+      lWr: { x: cx - GUIDE.shoulder / 2 - 0.04, y: shY + GUIDE.armDrop * 1.95 },
+      rWr: { x: cx + GUIDE.shoulder / 2 + 0.04, y: shY + GUIDE.armDrop * 1.95 },
+    };
+  }
+
+  function assessTracking(lm) {
+    const out = { ok: false, ready: false, score: 0, reason: 'step into the skeleton' };
+    if (!lm || !lm.length) { alignCountdownMs = 0; return out; }
+    let visible = 0;
+    for (const idx of REQUIRED_LANDMARKS) if (landmarkVisible(lm[idx])) visible++;
+    out.score = visible / REQUIRED_LANDMARKS.length;
+    if (visible < REQUIRED_LANDMARKS.length) {
+      out.reason = 'show head, shoulders, elbows, wrists, hips';
+      alignCountdownMs = 0;
+      return out;
+    }
+    const lSh = mirrored(lm[IDX.lSh]), rSh = mirrored(lm[IDX.rSh]);
+    const lHip = mirrored(lm[IDX.lHip]), rHip = mirrored(lm[IDX.rHip]);
+    const nose = mirrored(lm[IDX.nose]);
+    const shMid = { x: (lSh.x + rSh.x) / 2, y: (lSh.y + rSh.y) / 2 };
+    const hipMid = { x: (lHip.x + rHip.x) / 2, y: (lHip.y + rHip.y) / 2 };
+    const bodyCx = (shMid.x + hipMid.x) / 2;
+    const bodyCy = (shMid.y + hipMid.y) / 2;
+    const shoulderSpan = Math.abs(rSh.x - lSh.x);
+    const targetBodyY = (GUIDE.shY + GUIDE.hipY) / 2;
+    const centerError = Math.hypot(bodyCx - GUIDE.cx, (bodyCy - targetBodyY) * 1.2);
+    const sizeError = Math.abs(shoulderSpan - GUIDE.shoulder);
+    if (centerError > 0.09) {
+      out.reason = bodyCx < GUIDE.cx ? 'move right into the skeleton' : 'move left into the skeleton';
+      alignCountdownMs = 0;
+      return out;
+    }
+    if (sizeError > 0.1) {
+      out.reason = shoulderSpan < GUIDE.shoulder ? 'move closer' : 'step back';
+      alignCountdownMs = 0;
+      return out;
+    }
+    if (nose && Math.abs(nose.x - GUIDE.cx) > 0.12) {
+      out.reason = 'center your head';
+      alignCountdownMs = 0;
+      return out;
+    }
+    out.ok = true;
+    out.reason = 'hold alignment';
+    return out;
+  }
+
+  function updateActionButton() {
+    if (!actionEl) return;
+    const ready = trackingQuality && trackingQuality.ready;
+    actionEl.disabled = !!recording || !!pendingRecord || !ready;
+    actionEl.textContent = recording ? 'Recording...' : pendingRecord ? 'Countdown...' : ready ? 'Record' : 'Align skeleton';
+  }
+
+  function updateAlignmentGate() {
+    if (!trackingQuality || recording) { updateActionButton(); return; }
+    const now = performance.now();
+    const dtMs = lastAlignAt ? Math.min(120, now - lastAlignAt) : 0;
+    lastAlignAt = now;
+    if (trackingQuality.ok) alignCountdownMs = Math.min(ALIGN_COUNTDOWN_MS, alignCountdownMs + dtMs);
+    else { alignCountdownMs = 0; lastAlignAt = 0; }
+    trackingQuality.countdownLeftMs = Math.max(0, ALIGN_COUNTDOWN_MS - alignCountdownMs);
+    trackingQuality.ready = trackingQuality.ok && alignCountdownMs >= ALIGN_COUNTDOWN_MS;
+    if (pendingRecord && trackingQuality.ready) {
+      beginRecording();
+    } else if (pendingRecord) {
+      const seconds = Math.ceil(trackingQuality.countdownLeftMs / 1000);
+      setState(activePlayer, trackingQuality.ok ? STATUS.countdown : STATUS.align, trackingQuality.ok ? String(seconds) : trackingQuality.reason);
+    } else {
+      const state = trackingQuality.ready ? STATUS.locked : trackingQuality.ok ? STATUS.countdown : STATUS.align;
+      const detail = trackingQuality.ready ? null : trackingQuality.ok ? String(Math.ceil(trackingQuality.countdownLeftMs / 1000)) : trackingQuality.reason;
+      setState(activePlayer, state, detail);
+    }
+    updateActionButton();
   }
 
   function poseFromLandmarks(lm, context) {
@@ -376,7 +529,10 @@
       pctx.drawImage(video, 0, 0, lw, lh);
       pctx.restore();
     }
-    drawTrackedDoodle(pctx, lw, lh, false);
+    drawGuideSkeleton(pctx, lw, lh);
+    drawHumanSkeleton(pctx, lw, lh);
+    if (recording) drawTrackedDoodle(pctx, lw, lh, false);
+    drawTrackingHud(pctx, lw, lh);
 
     const rctx = recordCanvas.getContext('2d');
     rctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -386,6 +542,105 @@
     if (D.paperTexture) rctx.drawImage(D.paperTexture(512, 512), 0, 0);
     drawTrackedDoodle(rctx, 512, 512, true);
     captureKeyframe();
+  }
+
+  function pointToScreen(p, w, h) {
+    return p ? { x: p.x * w, y: p.y * h } : null;
+  }
+
+  function landmarkToScreen(p, w, h) {
+    return pointToScreen(mirrored(p), w, h);
+  }
+
+  function drawGuideSkeleton(ctx, w, h) {
+    const g = guidePoints();
+    const pts = {
+      nose: pointToScreen(g.nose, w, h), lSh: pointToScreen(g.lSh, w, h), rSh: pointToScreen(g.rSh, w, h),
+      lEl: pointToScreen(g.lEl, w, h), rEl: pointToScreen(g.rEl, w, h), lWr: pointToScreen(g.lWr, w, h), rWr: pointToScreen(g.rWr, w, h),
+      lHip: pointToScreen(g.lHip, w, h), rHip: pointToScreen(g.rHip, w, h),
+    };
+    const edges = [['lSh', 'rSh'], ['lSh', 'lHip'], ['rSh', 'rHip'], ['lHip', 'rHip'], ['lSh', 'lEl'], ['lEl', 'lWr'], ['rSh', 'rEl'], ['rEl', 'rWr']];
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = D.COL.paper;
+    ctx.lineWidth = 10;
+    for (const e of edges) {
+      ctx.beginPath(); ctx.moveTo(pts[e[0]].x, pts[e[0]].y); ctx.lineTo(pts[e[1]].x, pts[e[1]].y); ctx.stroke();
+    }
+    ctx.strokeStyle = D.COL.ink;
+    ctx.setLineDash([10, 10]);
+    ctx.lineWidth = 4;
+    for (const e of edges) {
+      ctx.beginPath(); ctx.moveTo(pts[e[0]].x, pts[e[0]].y); ctx.lineTo(pts[e[1]].x, pts[e[1]].y); ctx.stroke();
+    }
+    ctx.setLineDash([]);
+    ctx.fillStyle = D.COL.paper;
+    ctx.strokeStyle = D.COL.ink;
+    ctx.lineWidth = 3;
+    Object.keys(pts).forEach((key) => {
+      const r = key === 'nose' ? 8 : 7;
+      ctx.beginPath(); ctx.arc(pts[key].x, pts[key].y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  function drawHumanSkeleton(ctx, w, h) {
+    if (!currentLandmarks) return;
+    const ready = trackingQuality && trackingQuality.ready;
+    const ok = trackingQuality && trackingQuality.ok;
+    const color = ready || ok ? '#22863a' : '#b3402a';
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const edge of SKELETON_EDGES) {
+      const a = landmarkToScreen(currentLandmarks[edge[0]], w, h);
+      const b = landmarkToScreen(currentLandmarks[edge[1]], w, h);
+      if (!a || !b) continue;
+      ctx.strokeStyle = D.COL.paper;
+      ctx.lineWidth = 9;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    for (const idx of REQUIRED_LANDMARKS) {
+      const p = landmarkToScreen(currentLandmarks[idx], w, h);
+      if (!p) continue;
+      ctx.fillStyle = landmarkVisible(currentLandmarks[idx]) ? color : '#b3402a';
+      ctx.strokeStyle = D.COL.paper;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 6.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawTrackingHud(ctx, w, h) {
+    const q = trackingQuality;
+    const leftMs = q && q.countdownLeftMs != null ? q.countdownLeftMs : ALIGN_COUNTDOWN_MS;
+    const progress = q && q.ok ? 1 - (leftMs / ALIGN_COUNTDOWN_MS) : 0;
+    const label = recording
+      ? 'Recording doodle puppet'
+      : q && q.ready
+        ? 'Skeleton locked'
+        : q && q.ok
+          ? 'Hold alignment ' + Math.ceil(leftMs / 1000)
+          : q && q.reason
+            ? q.reason
+            : 'Loading pose tracker';
+    ctx.save();
+    D.roundedRect(ctx, 14, 14, Math.min(330, w - 28), 56, 8, { width: 3, color: D.COL.ink, fill: D.COL.paper, rnd: DS.makeRng(84), passes: 1 });
+    ctx.fillStyle = D.COL.ink;
+    ctx.textBaseline = 'middle';
+    ctx.font = "18px 'Patrick Hand', sans-serif";
+    ctx.fillText(label, 30, 36);
+    ctx.fillStyle = q && (q.ready || q.ok) ? '#22863a' : '#b3402a';
+    ctx.fillRect(30, 55, 230 * clamp(progress, 0, 1), 7);
+    ctx.strokeStyle = D.COL.ink;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(30, 55, 230, 7);
+    ctx.restore();
   }
 
   function drawTrackedDoodle(ctx, w, h, recordingCanvas) {
@@ -428,8 +683,26 @@
   async function startRecording(playerIndex) {
     if (recording) return recording.promise;
     activePlayer = playerIndex || activePlayer || 0;
-    if (!stream) await startCamera(activePlayer);
+    if (!stream) {
+      const ok = await startCamera(activePlayer);
+      if (!ok) return null;
+    }
+    if (!trackingQuality || !trackingQuality.ready) {
+      setState(activePlayer, STATUS.align, trackingQuality && trackingQuality.reason ? trackingQuality.reason : 'step into the skeleton');
+      updateActionButton();
+      return new Promise((resolve, reject) => {
+        pendingRecord = { playerIndex: activePlayer, resolve, reject };
+      });
+    }
+    return beginRecording();
+  }
+
+  function beginRecording() {
+    if (recording) return recording.promise;
+    const waiting = pendingRecord;
+    pendingRecord = null;
     setState(activePlayer, STATUS.recording);
+    updateActionButton();
     const chunks = [];
     const recStream = recordCanvas.captureStream ? recordCanvas.captureStream(30) : null;
     let recorder = null;
@@ -448,7 +721,10 @@
       chunks,
       recorder,
       promise,
-      resolve,
+      resolve: (value) => {
+        resolve(value);
+        if (waiting) waiting.resolve(value);
+      },
       clipDataUrl: null,
     };
     captureKeyframe(true);
@@ -488,6 +764,7 @@
       lastKeyframes = rec.keyframes.slice();
       lastSummary = rec.summary;
       setState(rec.playerIndex, STATUS.generating);
+      updateActionButton();
       rec.resolve(dataUrl);
       return dataUrl;
     };

@@ -448,8 +448,10 @@
     const skinHash = DS.Finishers.victimSkinHash('P' + (i + 1), ch);
     DS.UltimateRecorder.configurePlayer(i, { character: ch, facing: i === 1 ? -1 : 1 });
     try {
-      await DS.UltimateRecorder.startCamera(i);
+      const cameraReady = await DS.UltimateRecorder.startCamera(i);
+      if (!cameraReady) return;
       const motionClipDataUrl = await DS.UltimateRecorder.startRecording(i);
+      if (!motionClipDataUrl) return;
       const keyframeDataUrls = DS.UltimateRecorder.getKeyframes();
       const motionSummary = DS.UltimateRecorder.getMotionSummary();
       DS.UltimateRecorder.hide();
