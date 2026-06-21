@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Doodle Smash — Draw</title>
+<style>
+  :root { --paper:#f4efe2; --ink:#1a1a1a; --accent:#ffd34d; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--paper); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; touch-action:none; user-select:none; }
+  #wrap { display:flex; flex-direction:column; height:100%; padding:1.4vh 1.4vh calc(1.4vh + env(safe-area-inset-bottom)); gap:1vh; }
+  #status { font-weight:800; font-size:2.2vh; text-align:center; padding:.6vh; border-radius:1vh; background:#fff; border:.3vh solid var(--ink); }
+  #status.ok { background:#cdebc6; } #status.bad { background:#f3c0bb; }
+  .label { font-weight:800; font-size:2vh; opacity:.8; }
+  #draw { flex:1 1 auto; width:100%; background:#fff; border:.5vh solid var(--ink); border-radius:1.6vh; touch-action:none; display:block; }
+  #tools { display:flex; align-items:center; gap:1.2vh; }
+  button { font:inherit; font-weight:800; font-size:2vh; padding:1vh 2vh; border:.4vh solid var(--ink);
+    border-radius:1.2vh; background:#fff; }
+  #clear { background:#fff; }
+  #token { width:11vh; height:11vh; background:#fff; border:.5vh dashed var(--ink); border-radius:1.4vh; display:none; touch-action:none; }
+  #token.ready { display:block; }
+  #tokenhint { font-weight:800; font-size:1.9vh; opacity:.65; flex:1; }
+  #maparea { flex:0 0 auto; }
+  #map { width:100%; height:26vh; background:#eae3d2; border:.5vh solid var(--ink); border-radius:1.6vh; display:block; touch-action:none; }
+  #ghost { position:fixed; pointer-events:none; z-index:50; width:11vh; height:11vh; margin:-5.5vh 0 0 -5.5vh;
+    background:rgba(255,255,255,.92); border:.5vh solid var(--accent); border-radius:1.4vh; display:none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="status">Connecting…</div>
+  <div class="label">1 · Draw something</div>
+  <canvas id="draw"></canvas>
+  <div id="tools">
+    <button id="clear">Clear</button>
+    <canvas id="token"></canvas>
+    <div id="tokenhint">2 · drag your drawing onto the arena →</div>
+  </div>
+  <div id="maparea">
+    <div class="label">3 · Drop it where you want it</div>
+    <canvas id="map"></canvas>
+  </div>
+</div>
+<canvas id="ghost"></canvas>
+
+<script>
+(function(){
+  'use strict';
+  var qs = new URLSearchParams(location.search);
+  var lobby = (qs.get('lobby')||'').toUpperCase();
+  var statusEl = document.getElementById('status');
+  function setStatus(t, cls){ statusEl.textContent = t; statusEl.className = cls||''; }
+
+  // ---------- relay (same protocol as the phone controller) ----------
+  var ws=null, slot=null, alive=false, stage={ w:1920, h:1080, platforms:[] };
+  function wsURL(){ return (location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/ws'; }
+  function connect(){
+    if(!lobby){ setStatus('No lobby code — open from the game', 'bad'); return; }
+    try { ws = new WebSocket(wsURL()); } catch(e){ setStatus('Cannot connect','bad'); return; }
+    ws.onopen = function(){ ws.send(JSON.stringify({ t:'join', lobby:lobby, name:'Drawer', draw:true })); };
+    ws.onmessage = function(ev){
+      var m; try { m = JSON.parse(ev.data); } catch(e){ return; }
+      if (m.t==='joined'){ slot=m.slot; alive=true; setStatus('Connected — draw & drop!','ok'); ws.send(JSON.stringify({ t:'needstage' })); }
+      else if (m.t==='full'){ setStatus('Lobby full','bad'); }
+      else if (m.t==='nolobby'){ setStatus('Lobby not found — get a fresh code','bad'); }
+      else if (m.t==='hostgone'){ setStatus('Game disconnected','bad'); alive=false; }
+      else if (m.t==='stage'){ stage = { w:m.w||1920, h:m.h||1080, platforms:m.platforms||[] }; drawMap(); }
+    };
+    ws.onclose = function(){ alive=false; setStatus('Reconnecting…','bad'); setTimeout(connect, 1500); };
+    ws.onerror = function(){ try{ ws.close(); }catch(e){} };
+  }
+  function sendDraw(strokes, x, y){ if(ws && ws.readyState===1 && alive) ws.send(JSON.stringify({ t:'draw', strokes:strokes, x:x, y:y })); }
+
+  // ---------- draw canvas ----------
+  var draw = document.getElementById('draw'), dctx = draw.getContext('2d');
+  var strokes = [], cur = null;
+  function fitCanvas(c){ var r=c.getBoundingClientRect(), dpr=Math.min(2, window.devicePixelRatio||1);
+    c.width=Math.round(r.width*dpr); c.height=Math.round(r.height*dpr); var x=c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0); return {w:r.width,h:r.height}; }
+  var dsize = {w:300,h:300};
+  function layout(){ dsize=fitCanvas(draw); redraw(); fitCanvas(map); drawMap(); }
+  function dpos(e){ var r=draw.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
+  draw.addEventListener('pointerdown', function(e){ cur={ w:5, pts:[dpos(e)] }; strokes.push(cur); try{draw.setPointerCapture(e.pointerId);}catch(x){} e.preventDefault(); });
+  draw.addEventListener('pointermove', function(e){ if(!cur) return; cur.pts.push(dpos(e)); redraw(); e.preventDefault(); });
+  window.addEventListener('pointerup', function(){ if(cur){ cur=null; renderToken(); } });
+  function redraw(){
+    dctx.fillStyle='#fff'; dctx.fillRect(0,0,dsize.w,dsize.h);
+    dctx.strokeStyle='#1a1a1a'; dctx.lineWidth=4; dctx.lineCap='round'; dctx.lineJoin='round';
+    for(var i=0;i<strokes.length;i++){ var p=strokes[i].pts; if(!p.length) continue; dctx.beginPath(); dctx.moveTo(p[0][0],p[0][1]); for(var j=1;j<p.length;j++) dctx.lineTo(p[j][0],p[j][1]); dctx.stroke(); }
+  }
+  document.getElementById('clear').onclick = function(){ strokes=[]; cur=null; redraw(); document.getElementById('token').classList.remove('ready'); };
+
+  // normalize canvas-pixel strokes -> centred local coords (~-40..40), exactly like DS.DrawPad.
+  function normalize(src){
+    var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for(var i=0;i<src.length;i++) for(var j=0;j<src[i].pts.length;j++){ var p=src[i].pts[j]; x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+    var w=Math.max(1,x1-x0), h=Math.max(1,y1-y0), cx=(x0+x1)/2, cy=(y0+y1)/2, sc=80/Math.max(w,h);
+    return src.map(function(s){ return { w:s.w||5, pts:s.pts.map(function(p){ return [(p[0]-cx)*sc,(p[1]-cy)*sc]; }) }; });
+  }
+
+  // ---------- token (a draggable thumbnail of the drawing) ----------
+  var token = document.getElementById('token'), tctx = token.getContext('2d');
+  function renderToken(){
+    if(!strokes.length){ token.classList.remove('ready'); return; }
+    var ts=fitCanvas(token); token.classList.add('ready');
+    var x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+    for(var i=0;i<strokes.length;i++) for(var j=0;j<strokes[i].pts.length;j++){ var p=strokes[i].pts[j]; x0=Math.min(x0,p[0]); y0=Math.min(y0,p[1]); x1=Math.max(x1,p[0]); y1=Math.max(y1,p[1]); }
+    var w=Math.max(1,x1-x0), h=Math.max(1,y1-y0), pad=ts.w*0.14, sc=Math.min((ts.w-pad*2)/w,(ts.h-pad*2)/h);
+    tctx.clearRect(0,0,ts.w,ts.h); tctx.fillStyle='#fff'; tctx.fillRect(0,0,ts.w,ts.h);
+    tctx.save(); tctx.translate(ts.w/2,ts.h/2); tctx.scale(sc,sc); tctx.translate(-(x0+x1)/2,-(y0+y1)/2);
+    tctx.strokeStyle='#1a1a1a'; tctx.lineWidth=4/sc; tctx.lineCap='round'; tctx.lineJoin='round';
+    for(var k=0;k<strokes.length;k++){ var pp=strokes[k].pts; if(!pp.length) continue; tctx.beginPath(); tctx.moveTo(pp[0][0],pp[0][1]); for(var m2=1;m2<pp.length;m2++) tctx.lineTo(pp[m2][0],pp[m2][1]); tctx.stroke(); }
+    tctx.restore();
+  }
+
+  // ---------- mini-map of the arena ----------
+  var map = document.getElementById('map'), mctx = map.getContext('2d');
+  function mapBox(){ var r=map.getBoundingClientRect(); var sc=Math.min(r.width/stage.w, r.height/stage.h); var ox=(r.width-stage.w*sc)/2, oy=(r.height-stage.h*sc)/2; return {r:r,sc:sc,ox:ox,oy:oy}; }
+  function drawMap(){
+    var r=map.getBoundingClientRect(); mctx.fillStyle='#eae3d2'; mctx.fillRect(0,0,r.width,r.height);
+    var b=mapBox();
+    mctx.fillStyle='#bcae8e'; mctx.strokeStyle='#1a1a1a'; mctx.lineWidth=2;
+    for(var i=0;i<stage.platforms.length;i++){ var p=stage.platforms[i]; var x=b.ox+p.x*b.sc, y=b.oy+p.y*b.sc, w=p.w*b.sc, h=Math.max(3,p.h*b.sc); mctx.fillRect(x,y,w,h); mctx.strokeRect(x,y,w,h); }
+    if(!stage.platforms.length){ mctx.fillStyle='#bcae8e'; mctx.fillRect(b.ox, b.oy+stage.h*b.sc*0.78, stage.w*b.sc, stage.h*b.sc*0.22); }
+  }
+  // tap on the map = place the current drawing there too (fallback to drag)
+  map.addEventListener('pointerdown', function(e){ var r=map.getBoundingClientRect(); dropAt(e.clientX-r.left, e.clientY-r.top); });
+
+  function dropAt(px, py){
+    if(!strokes.length){ return; }
+    var b=mapBox();
+    var wx=(px-b.ox)/b.sc, wy=(py-b.oy)/b.sc;            // map pixels -> world/view coords
+    wx=Math.max(40, Math.min(stage.w-40, wx)); wy=Math.max(20, Math.min(stage.h-40, wy));
+    sendDraw(normalize(strokes), wx, wy);
+    flashMap(px,py); strokes=[]; cur=null; redraw(); token.classList.remove('ready');
+  }
+  function flashMap(px,py){ drawMap(); mctx.strokeStyle='#e8662a'; mctx.lineWidth=4; mctx.beginPath(); mctx.arc(px,py,16,0,Math.PI*2); mctx.stroke(); setTimeout(drawMap, 350); }
+
+  // ---------- drag the token onto the map ----------
+  var ghost=document.getElementById('ghost'), gctx=ghost.getContext('2d'), dragging=false;
+  function fitGhost(){ var r=ghost.getBoundingClientRect(), dpr=Math.min(2,window.devicePixelRatio||1); ghost.width=Math.round(r.width*dpr); ghost.height=Math.round(r.height*dpr); gctx.setTransform(dpr,0,0,dpr,0,0); return {w:r.width,h:r.height}; }
+  token.addEventListener('pointerdown', function(e){
+    if(!strokes.length) return; dragging=true; e.preventDefault();
+    ghost.style.display='block'; var gs=fitGhost(); gctx.drawImage(token,0,0,gs.w,gs.h);
+    moveGhost(e.clientX,e.clientY); try{token.setPointerCapture(e.pointerId);}catch(x){}
+  });
+  token.addEventListener('pointermove', function(e){ if(dragging){ moveGhost(e.clientX,e.clientY); e.preventDefault(); } });
+  token.addEventListener('pointerup', function(e){
+    if(!dragging) return; dragging=false; ghost.style.display='none';
+    var r=map.getBoundingClientRect();
+    if(e.clientX>=r.left && e.clientX<=r.right && e.clientY>=r.top && e.clientY<=r.bottom){ dropAt(e.clientX-r.left, e.clientY-r.top); }
+  });
+  function moveGhost(x,y){ ghost.style.left=x+'px'; ghost.style.top=y+'px'; }
+
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', function(){ setTimeout(layout, 200); });
+  layout(); connect();
+})();
+</script>
+</body>
+</html>

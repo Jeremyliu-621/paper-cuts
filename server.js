@@ -298,6 +298,10 @@ const requestHandler = async (req, res) => {
   if (p === '/c' || p === '/controller') {
     return sendFile(res, path.join(ROOT, 'controller.html'));
   }
+  // iPad draw pad (draw -> drag onto the mini-map -> drops into the live match)
+  if (p === '/draw' || p === '/drawpad') {
+    return sendFile(res, path.join(ROOT, 'drawpad.html'));
+  }
   // QR image for a join URL
   if (p === '/qr') {
     const data = url.searchParams.get('d') || '';
@@ -374,13 +378,20 @@ wss.on('connection', (ws) => {
       lobby.players.set(slot, { ws, name, color });
       ws.role = 'controller'; ws.code = m.lobby; ws.slot = slot;
       send(ws, { t: 'joined', slot, lobby: m.lobby, name });
-      if (lobby.host) send(lobby.host, { t: 'join', slot, name, color });
+      // `draw:true` marks an iPad draw pad — the host keeps it out of the player roster (it just relays drawings)
+      if (lobby.host) send(lobby.host, { t: 'join', slot, name, color, draw: !!m.draw });
       return;
     }
     if (m.t === 'in' && ws.role === 'controller') {
       // relay an input frame to the host, tagged with this controller's slot
       const lobby = lobbies.get(ws.code);
       if (lobby && lobby.host) send(lobby.host, { t: 'in', slot: ws.slot, d: m.d });
+      return;
+    }
+    if ((m.t === 'draw' || m.t === 'needstage') && ws.role === 'controller') {
+      // an iPad DRAW pad -> relay to the host (game): a drawing to inject, or a mini-map stage request
+      const lobby = lobbies.get(ws.code);
+      if (lobby && lobby.host) send(lobby.host, Object.assign({}, m, { slot: ws.slot }));
       return;
     }
     if (ws.role === 'host') {

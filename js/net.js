@@ -64,9 +64,11 @@
       ws.onmessage = (ev) => {
         let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
         if (m.t === 'hosted') { this.code = m.lobby; this.connected = true; this._emit(); }
-        else if (m.t === 'join') { this.players[m.slot] = freshPlayer(m.name || ('Player ' + m.slot), m.color || null); this._emit(); }
+        else if (m.t === 'join') { if (!m.draw) this.players[m.slot] = freshPlayer(m.name || ('Player ' + m.slot), m.color || null); this._emit(); }
         else if (m.t === 'leave') { delete this.players[m.slot]; this._emit(); }
         else if (m.t === 'in') { this._applyInput(m.slot, m.d); }
+        else if (m.t === 'draw') { this._injectDraw(m); }          // iPad draw pad: inject a drawing
+        else if (m.t === 'needstage') { this._sendStage(m.slot); } // iPad draw pad: send the mini-map stage
       };
       ws.onclose = () => {
         this.connected = false; this._emit();
@@ -98,6 +100,30 @@
         case 'ult': pl.ult = d.ult || 'hammer'; this._emit(); break;
         case 'ready': pl.ready = !!d.ready; this._emit(); break;
       }
+    },
+
+    // an iPad DRAW controller sent a drawing to drop into the live match. strokes are already
+    // normalized (~-40..40, centred) like DS.DrawPad; x/y are world/view coords from the mini-map
+    // placement. Blank label -> the recognizer names it (DS.AI.spawnDrawn). Never throws.
+    _injectDraw(m) {
+      if (!DS.AI || !DS.game || DS.game.state !== 'playing') return;
+      const strokes = m && m.strokes;
+      if (!Array.isArray(strokes) || !strokes.length) return;
+      const v = DS.game.view || { w: 1920, h: 1080 };
+      const x = (typeof m.x === 'number') ? m.x : v.w * 0.5;
+      const y = (typeof m.y === 'number') ? m.y : 150;
+      try {
+        if (m.label) DS.AI.spawnFromStrokes(strokes, m.label, x, y);
+        else DS.AI.spawnDrawn(strokes, x, y);
+      } catch (e) { /* a bad payload can't break the match */ }
+    },
+
+    // send the live stage layout to a draw controller so its placement mini-map matches the arena.
+    _sendStage(slot) {
+      const g = DS.game, v = (g && g.view) || { w: 1920, h: 1080 };
+      const plats = (g && g.stage && g.stage.platforms) || (g && g.platforms) || [];
+      const platforms = plats.map(function (p) { return { x: p.x, y: p.y, w: p.w, h: p.h }; });
+      this.send({ t: 'stage', slot: slot, w: v.w, h: v.h, platforms: platforms });
     },
 
     // host → phones: a one-off control message (lobby/play phase, colour assign, …).
