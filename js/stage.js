@@ -595,28 +595,51 @@
     return y === null ? null : { y, tilt };
   }
   // the highest platform SURFACE below `belowY` spanning `x`, via each candidate's real top contour
-  // (so a pillar lands on the actual, possibly slanted, surface). Returns {y, tilt} or null.
-  function surfaceBelow(plats, x, belowY, ignore) {
+  // (so a pillar lands on the actual, possibly slanted, surface). Only GROUNDED platforms count, so a
+  // pillar never stilts onto a thin floating ledge that itself hangs in space. Returns {y,tilt} or null.
+  function surfaceBelow(plats, x, belowY, ignore, grounded) {
     let best = null;
     for (const q of plats) {
-      if (q === ignore || q.move) continue;
+      if (q === ignore || q.move || (grounded && !grounded.has(q))) continue;
       if (x < q.x + 6 || x > q.x + q.w - 6) continue;
       const ta = topAt(topContour(q), x);
       if (ta && ta.y >= belowY && (!best || ta.y < best.y)) best = ta;
     }
     return best;
   }
-  // union x-span (clipped to p) of any non-moving platform sitting beneath/at p within reach;
-  // null = nothing under p at all → it's a floating island.
-  function supportSpan(plats, p) {
+  // union x-span (clipped to p) of any GROUNDED platform sitting beneath/at p within reach;
+  // null = nothing solid under p → it's a floating island (rather than stilted on air).
+  function supportSpan(plats, p, grounded) {
     const pb = p.y + p.h; let l = Infinity, r = -Infinity;
     for (const q of plats) {
-      if (q === p || q.move) continue;
+      if (q === p || q.move || (grounded && !grounded.has(q))) continue;
       if (q.y < pb - 6 || q.y > pb + PILLAR_MAX) continue; // resting (≈pb) counts; deep-down doesn't
       const oL = Math.max(p.x, q.x), oR = Math.min(p.x + p.w, q.x + q.w);
       if (oR > oL) { l = Math.min(l, oL); r = Math.max(r, oR); }
     }
     return r > l ? { l, r } : null;
+  }
+  // platforms that ultimately rest on the floor: the base ground slabs, then anything resting (within
+  // reach) on an already-grounded platform, to a fixpoint. A platform NOT in this set hangs free and
+  // must be dressed as an island — and is never used as a footing for someone else's pillar.
+  function computeGrounded(plats, floorBottom) {
+    const grounded = new Set();
+    for (const q of plats) {
+      if (q.move) continue;
+      if (!q.pass && q.h >= 100 && (q.y + q.h) >= floorBottom - 40) grounded.add(q); // a base ground slab
+    }
+    for (let pass = 0, changed = true; changed && pass < 24; pass++) {
+      changed = false;
+      for (const p of plats) {
+        if (p.move || grounded.has(p)) continue;
+        const pb = p.y + p.h;
+        for (const q of grounded) {
+          if (q.y < pb - 6 || q.y > pb + PILLAR_MAX) continue;
+          if (Math.min(p.x + p.w, q.x + q.w) > Math.max(p.x, q.x)) { grounded.add(p); changed = true; break; }
+        }
+      }
+    }
+    return grounded;
   }
   // world-space underside contour of a platform — the drawn stroke's ACTUAL bottom edge (so the
   // dressing follows a tilted/curved platform), or a flat line under a plain rectangle.
@@ -678,6 +701,7 @@
     const behind = [], front = [], plats = st.platforms || [];
     let floorBottom = -Infinity; // the lowest platform bottom — anything resting here is the base ground
     for (const q of plats) if (!q.move) floorBottom = Math.max(floorBottom, q.y + q.h);
+    const grounded = computeGrounded(plats, floorBottom); // who actually reaches the floor (pillar footings)
     for (const p of plats) {
       if (p.move) continue; // swinging/moving platforms ride free — no anchored dressing
       const gimmick = p.kind === 'cannon' || p.kind === 'trampoline' || p.kind === 'spikes' || p.kind === 'box';
@@ -688,7 +712,7 @@
       // everything anchors to the platform's real underside CONTOUR, so it follows a tilt/curve.
       if (!isBase) {
         const contour = undersideContour(p);
-        const sp = supportSpan(plats, p);
+        const sp = supportSpan(plats, p, grounded);
         if (!sp) {
           // truly floating → a jagged island that follows the (possibly tilted) underside + foliage
           behind.push({ t: 'island', top: undersideStrip(contour, p.x, pr), depth: Math.min(150, Math.max(46, p.w * 0.4)), seed: seed + 1 });
@@ -698,7 +722,7 @@
           const pillars = []; // collect pillars (to add a buttress to a tall lone one afterwards)
           // drop a pillar from an anchor point (ax,ay,tilt) to the surface beneath; returns it or null
           const addPier = (ax, ay, tlt, idx, thin, plant) => {
-            const sup = surfaceBelow(plats, ax, ay + 2, p);
+            const sup = surfaceBelow(plats, ax, ay + 2, p, grounded);
             if (!sup || sup.y - ay <= GAP_MIN || sup.y - ay >= PILLAR_MAX) return null;
             const d = { t: 'pillar', x: ax, topY: ay, botY: sup.y, tilt: tlt, botTilt: sup.tilt, thin, seed: seed + 10 + idx * 7 };
             behind.push(d); pillars.push(d);
@@ -710,19 +734,24 @@
           // is the supported underside roughly horizontal? (so an x-based arcade reads right)
           const uL = contourPt(contour, 0.12), uR = contourPt(contour, 0.88);
           const flat = Math.abs(uR.y - uL.y) < span * 0.26;
-          const midGap = (() => { const s = surfaceBelow(plats, (l + r) / 2, (uL.y + uR.y) / 2 + 2, p); return s ? s.y - (uL.y + uR.y) / 2 : 0; })();
+          const midGap = (() => { const s = surfaceBelow(plats, (l + r) / 2, (uL.y + uR.y) / 2 + 2, p, grounded); return s ? s.y - (uL.y + uR.y) / 2 : 0; })();
           if (flat && span > 420 && midGap > 150 && density >= 0.6) {
             // ARCADE: a row of slim piers joined by arches (aqueduct/viaduct) — for big, tall, flat spans
-            const bays = Math.max(2, Math.min(6, Math.round((span / 250) * density)));
-            const tops = [];
+            // fewer, wider bays read as bolder arches (an aqueduct, not a fence of swags)
+            const bays = Math.max(2, Math.min(5, Math.round((span / 320) * density)));
+            const tops = [], feet = [];
             for (let k = 0; k <= bays; k++) {
               const x = l + (span * k) / bays, u = undersideAt(contour, x), ay = u ? u.y : pb;
-              addPier(x, ay, u ? u.tilt : 0, k, true, false);
-              tops.push([x, ay]);
+              const pier = addPier(x, ay, u ? u.tilt : 0, k, true, false);
+              tops.push([x, ay]); feet.push(pier ? pier.botY : ay + 200);
             }
             for (let k = 0; k < bays; k++) {
-              const a = tops[k], b = tops[k + 1], sd = Math.min(64, (b[0] - a[0]) * 0.5);
-              behind.push({ t: 'arch', x0: a[0], y0: a[1], x1: b[0], y1: b[1], sd, seed: seed + 50 + k * 5 });
+              const a = tops[k], b = tops[k + 1], hw = (b[0] - a[0]) / 2;
+              const pierH = (feet[k] + feet[k + 1]) / 2 - (a[1] + b[1]) / 2;   // deck→foot height
+              // round arch ≈ semicircular (rise = half the bay), but stretched taller on tall piers so it
+              // fills the bay (a stilted arch) instead of stranding a long bare leg — capped at ⅔ the pier.
+              const rise = Math.max(28, Math.min(pierH * 0.66, Math.max(hw, pierH * 0.42)));
+              behind.push({ t: 'arch', x0: a[0], y0: a[1], x1: b[0], y1: b[1], rise, seed: seed + 50 + k * 5 });
             }
           } else {
             // pillars anchored to points sampled ALONG the underside contour (near each end, + middle
@@ -789,10 +818,10 @@
   // a lintel that ROTATES to sit flush against the (possibly tilted) underside it holds up.
   function drawPillar(ctx, it) {
     const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, cx = it.x, topY = it.topY, botY = it.botY, tilt = it.tilt || 0;
-    const w = it.thin ? 5 : 8; // half the gap between the two uprights — CONSTANT (no taper, no fill)
+    const w = it.thin ? 6.5 : 10.5; // half the gap between the two uprights — CONSTANT (no taper, no fill); ~30% chunkier
     // the shaft is just two straight parallel lines running up
-    D.line(ctx, cx - w, topY + 2, cx - w, botY, { width: 3, color: SCN, rnd, passes: 1 });
-    D.line(ctx, cx + w, topY + 2, cx + w, botY, { width: 3, color: SCN, rnd, passes: 1 });
+    D.line(ctx, cx - w, topY + 2, cx - w, botY, { width: 3.5, color: SCN, rnd, passes: 1 });
+    D.line(ctx, cx + w, topY + 2, cx + w, botY, { width: 3.5, color: SCN, rnd, passes: 1 });
     // a couple of little arched windows between the uprights on a chunky tall pier (a tower leg)
     if (!it.thin && h > 230) {
       const wins = Math.min(3, Math.floor(h / 170));
@@ -862,12 +891,33 @@
     ctx.restore();
   }
 
-  // an arcade arch between two piers: springs from a point down each pier and crowns at the deck
+  // an arcade arch spanning two piers: a real round (semicircular/segmental) arch that springs from
+  // an impost partway down each pier and crowns just under the deck — the opening below is arch-topped.
   function drawArch(ctx, it) {
-    const rnd = DS.makeRng(it.seed), midx = (it.x0 + it.x1) / 2, crown = Math.min(it.y0, it.y1) + 4;
-    D.curve(ctx, [[it.x0, it.y0 + it.sd], [midx, crown], [it.x1, it.y1 + it.sd]], { width: 4, color: SCN, rnd, passes: 1 });
-    ctx.globalAlpha = 0.4; D.curve(ctx, [[it.x0 + 4, it.y0 + it.sd], [midx, crown + 7], [it.x1 - 4, it.y1 + it.sd]], { width: 2.5, color: SCN, rnd, passes: 1 }); ctx.globalAlpha = 1;
-    ctx.fillStyle = SCN; ctx.globalAlpha = 0.5; ctx.beginPath(); ctx.arc(midx, crown - 1, 2.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; // keystone dot
+    const rnd = DS.makeRng(it.seed);
+    const midx = (it.x0 + it.x1) / 2, hw = (it.x1 - it.x0) / 2;
+    const deck = (it.y0 + it.y1) / 2 + 3;      // crown sits just under the platform underside
+    const rise = it.rise;                       // springline is `rise` below the deck
+    const impost = deck + rise;
+    // sample the upper half of an ellipse: ends at the two imposts, apex at the crown
+    const N = 20, arc = [], inner = [];
+    for (let i = 0; i <= N; i++) {
+      const a = Math.PI * (1 - i / N);          // π (left impost) → 0 (right impost)
+      const x = midx + hw * Math.cos(a), s = Math.sin(a);
+      arc.push([x, impost - rise * s]);
+      inner.push([midx + (hw - 6) * Math.cos(a), impost - (rise - 6) * s]); // archivolt (inner ring)
+    }
+    D.strokePts(ctx, arc, { width: 4, color: SCN, rnd, passes: 1, jitter: 0.5 });
+    ctx.globalAlpha = 0.4; D.strokePts(ctx, inner, { width: 2.5, color: SCN, passes: 1, jitter: 0.5 }); ctx.globalAlpha = 1;
+    // little voussoir ticks around the crown + a keystone, so it reads as masonry not a loop
+    ctx.globalAlpha = 0.5;
+    for (const a of [Math.PI * 0.5, Math.PI * 0.32, Math.PI * 0.68]) {
+      const ox = midx + hw * Math.cos(a), oy = impost - rise * Math.sin(a);
+      const ix = midx + (hw - 7) * Math.cos(a), iy = impost - (rise - 7) * Math.sin(a);
+      D.line(ctx, ix, iy, ox, oy, { width: 2, color: SCN, rnd, passes: 1 });
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = SCN; ctx.globalAlpha = 0.45; ctx.beginPath(); ctx.arc(midx, deck + 1, 2.6, 0, 7); ctx.fill(); ctx.globalAlpha = 1; // keystone dot
   }
   // a buttress: a wedge strut bracing a tall lone pier back to the ground
   function drawButtress(ctx, it) {
