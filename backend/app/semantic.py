@@ -13,6 +13,7 @@ from .schemas import (
     SemanticDraft,
     SemanticGeometry,
     SemanticQuestion,
+    VisualObservationHint,
 )
 
 MIN_PLATFORM_W = 64.0
@@ -27,11 +28,24 @@ CHOICES = [
     SemanticChoice(id="damaging", label="Damaging / spikes", role="platform", behavior="hurt"),
     SemanticChoice(id="icy", label="Icy / crystal look", role="platform", behavior="ice"),
     SemanticChoice(id="breakable", label="Breakable / box", role="platform", behavior="breakable"),
+    SemanticChoice(id="cannon", label="Cannon", role="platform", behavior="cannon"),
     SemanticChoice(id="decor", label="Decoration", role="decor", behavior="decor"),
     SemanticChoice(id="no_ignore", label="No / ignore", role="ignore", behavior="ignore"),
 ]
 
 CHOICE_BY_ID = {choice.id: choice for choice in CHOICES}
+
+CHOICE_ID_BY_BEHAVIOR = {
+    "solid": "normal",
+    "pass": "pass_through",
+    "bounce": "bouncy",
+    "hurt": "damaging",
+    "ice": "icy",
+    "breakable": "breakable",
+    "cannon": "cannon",
+    "decor": "decor",
+    "ignore": "no_ignore",
+}
 
 
 def _num(value: Any) -> float | None:
@@ -109,6 +123,14 @@ def _is_clear_rectangle(shape: dict[str, Any]) -> bool:
     return w >= MIN_PLATFORM_W and MIN_PLATFORM_H <= h <= MAX_PLATFORM_H and w / max(h, 1.0) >= 1.8
 
 
+def _stage_choice_id(shape: dict[str, Any]) -> str | None:
+    stage = shape.get("stage")
+    if not isinstance(stage, dict) or stage.get("role") != "platform":
+        return None
+    behavior = str(stage.get("behavior") or "").lower()
+    return CHOICE_ID_BY_BEHAVIOR.get(behavior)
+
+
 def _rectangle_geometry(shape: dict[str, Any]) -> SemanticGeometry | None:
     x = _num(shape.get("x"))
     y = _num(shape.get("y"))
@@ -166,6 +188,7 @@ def _make_candidate(
     extractor: str,
     confidence: float,
     answers_by_binding: dict[tuple[str, str, tuple[str, ...]], SemanticAnswer],
+    forced_choice_id: str | None = None,
 ) -> SemanticCandidate:
     source_ids = sorted(source_ids)
     geometry_hash = _geometry_hash(source_ids, geometry)
@@ -184,6 +207,34 @@ def _make_candidate(
         clientId=client_id,
     )
     answer = answers_by_binding.get((candidate_id, geometry_hash, tuple(source_ids)))
+    forced_choice = CHOICE_BY_ID.get(forced_choice_id or "")
+    if forced_choice is not None:
+        answer_id = "answer-" + _hash(
+            {
+                "roomId": room_id,
+                "candidateId": candidate_id,
+                "questionId": question_id,
+                "choiceId": forced_choice.id,
+                "geometryHash": geometry_hash,
+                "sourceIds": source_ids,
+                "deterministic": True,
+            }
+        )[:12]
+        answer = SemanticAnswer(
+            answerId=answer_id,
+            questionId=question_id,
+            candidateId=candidate_id,
+            choiceId=forced_choice.id,
+            role=forced_choice.role,
+            behavior=forced_choice.behavior,
+            roomId=room_id,
+            worldId=world_id,
+            captureVersion=capture_version,
+            sourceIds=source_ids,
+            geometryHash=geometry_hash,
+            clientId=client_id,
+            answeredAt=datetime.now(UTC),
+        )
     status = "needs_answer"
     if answer:
         if answer.role == "platform":
@@ -207,6 +258,95 @@ def _make_candidate(
         question=question,
         answer=answer,
     )
+
+
+def _visual_hint_choice_id(hint: VisualObservationHint) -> str | None:
+    behavior = (hint.behavior or "").lower()
+    choice_id = CHOICE_ID_BY_BEHAVIOR.get(behavior)
+    if choice_id:
+        return choice_id
+    if hint.kind == "platform":
+        return "normal"
+    if hint.kind == "hazard":
+        return "damaging"
+    if hint.kind == "decor":
+        return "decor"
+    return None
+
+
+def _visual_hint_match_score(candidate: SemanticCandidate, hint: VisualObservationHint) -> int:
+    hint_source_ids = set(hint.source_ids)
+    if not hint_source_ids:
+        return 0
+    candidate_source_ids = set(candidate.source_ids)
+    if candidate_source_ids == hint_source_ids:
+        return 3
+    if candidate_source_ids.issubset(hint_source_ids) or hint_source_ids.issubset(candidate_source_ids):
+        return 2
+    if candidate_source_ids & hint_source_ids:
+        return 1
+    return 0
+
+
+def _apply_visual_hints(
+    *,
+    candidates: list[SemanticCandidate],
+    hints: list[VisualObservationHint],
+    room_id: str,
+    world_id: str | None,
+    capture_version: int,
+    client_id: str | None,
+) -> None:
+    for hint in sorted(hints, key=lambda item: item.confidence, reverse=True):
+        if hint.confidence < 0.55:
+            continue
+        choice = CHOICE_BY_ID.get(_visual_hint_choice_id(hint) or "")
+        if choice is None:
+            continue
+        matches = sorted(
+            (
+                (_visual_hint_match_score(candidate, hint), candidate)
+                for candidate in candidates
+                if candidate.answer is None
+            ),
+            key=lambda item: item[0],
+            reverse=True,
+        )
+        if not matches or matches[0][0] <= 0:
+            continue
+        candidate = matches[0][1]
+        answer_id = "answer-" + _hash(
+            {
+                "roomId": room_id,
+                "candidateId": candidate.candidate_id,
+                "questionId": candidate.question_id,
+                "choiceId": choice.id,
+                "geometryHash": candidate.geometry_hash,
+                "sourceIds": candidate.source_ids,
+                "visualObservation": True,
+            }
+        )[:12]
+        candidate.answer = SemanticAnswer(
+            answerId=answer_id,
+            questionId=candidate.question_id,
+            candidateId=candidate.candidate_id,
+            choiceId=choice.id,
+            role=choice.role,
+            behavior=choice.behavior,
+            roomId=room_id,
+            worldId=world_id,
+            captureVersion=capture_version,
+            sourceIds=candidate.source_ids,
+            geometryHash=candidate.geometry_hash,
+            clientId=client_id,
+            answeredAt=datetime.now(UTC),
+        )
+        if choice.role == "platform":
+            candidate.status = "confirmed"
+        elif choice.role == "decor":
+            candidate.status = "decor"
+        else:
+            candidate.status = "ignored"
 
 
 def _grouped_stroke_candidates(
@@ -264,6 +404,7 @@ def build_semantic_draft(
     projection: dict[str, Any] | None,
     client_id: str | None,
     prior_answers: list[SemanticAnswer],
+    visual_hints: list[VisualObservationHint] | None = None,
 ) -> SemanticDraft:
     answers_by_binding = {
         (answer.candidate_id, answer.geometry_hash, tuple(sorted(answer.source_ids))): answer
@@ -274,7 +415,8 @@ def build_semantic_draft(
     used_source_ids: set[str] = set()
 
     for shape in projection.get("shapes") or []:
-        if not isinstance(shape, dict) or not _is_clear_rectangle(shape):
+        forced_choice_id = _stage_choice_id(shape) if isinstance(shape, dict) else None
+        if not isinstance(shape, dict) or (not forced_choice_id and not _is_clear_rectangle(shape)):
             continue
         geometry = _rectangle_geometry(shape)
         source_id = str(shape.get("sourceId") or shape.get("id") or "")
@@ -287,9 +429,10 @@ def build_semantic_draft(
             client_id=client_id,
             source_ids=[source_id],
             geometry=geometry,
-            extractor="rectangle",
-            confidence=0.94,
+            extractor="stage_tool" if forced_choice_id else "rectangle",
+            confidence=0.99 if forced_choice_id else 0.94,
             answers_by_binding=answers_by_binding,
+            forced_choice_id=forced_choice_id,
         )
         candidates.append(candidate)
         used_source_ids.add(source_id)
@@ -327,6 +470,16 @@ def build_semantic_draft(
                 confidence=0.72,
                 answers_by_binding=answers_by_binding,
             )
+        )
+
+    if visual_hints:
+        _apply_visual_hints(
+            candidates=candidates,
+            hints=visual_hints,
+            room_id=room_id,
+            world_id=world_id,
+            capture_version=capture_version,
+            client_id=client_id,
         )
 
     active_answer_ids = {candidate.answer.answer_id for candidate in candidates if candidate.answer}

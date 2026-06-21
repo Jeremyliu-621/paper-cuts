@@ -56,6 +56,18 @@
     });
   }
 
+  function enterWorldStageEditor(world) {
+    if (!world) return;
+    exitLevelPreview();
+    hideRuntimeOverlays();
+    if (worldLibrary) worldLibrary.close();
+    mode = 'editor';
+    setActiveTab('editor');
+    game.mapId = world.mapId || world.id || 'meadow';
+    if (worldLibrary && worldLibrary.ensureWorldStage) worldLibrary.ensureWorldStage(world);
+    editor.editWorldStage(world);
+  }
+
   function exitLevelPreview() {
     if (DS.LevelPreview) DS.LevelPreview.exit();
   }
@@ -176,12 +188,13 @@
   };
   const worldLibrary = DS.WorldLibrary && DS.WorldLibrary.init({
     onEdit(world) {
-      enterLevelPreview(world);
+      enterWorldStageEditor(world);
     },
     onPlay(world) {
       exitLevelPreview();
+      if (worldLibrary && worldLibrary.ensureWorldStage) worldLibrary.ensureWorldStage(world);
       game.modeId = world.modeId || 'smash';
-      game.mapId = world.mapId || 'meadow';
+      game.mapId = world.mapId || world.id || 'meadow';
       document.querySelector('.tab[data-tab="play"]').click();
       game.rebuild();
       game.start();

@@ -161,7 +161,6 @@ function makeProjection(editor, capture) {
       color: colorFor(record),
       opacity: record.opacity ?? 1,
     }
-
     if (record.type === 'draw') {
       const points = getPointsFromDrawSegments(
         record.props.segments || [],
@@ -249,6 +248,7 @@ function choiceLabel(choice) {
     damaging: 'Damaging',
     icy: 'Icy',
     breakable: 'Breakable',
+    cannon: 'Cannon',
     decor: 'Decoration',
     no_ignore: 'Ignore',
   }
@@ -785,6 +785,7 @@ export default function App() {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
         setVisualObservation(message.visualObservation || null)
+        if (message.semanticDraft) setSemanticDraft(message.semanticDraft)
       } else if (message.type === 'error') {
         setError(message.message || 'Backend rejected a message.')
         setSemanticError(message.message || 'Backend rejected a message.')

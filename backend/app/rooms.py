@@ -224,10 +224,21 @@ class RoomRegistry:
         if current and current.job_id != observation.job_id:
             return None
         room.visual_observation = observation
+        if observation.status == "ready":
+            room.semantic_draft = build_semantic_draft(
+                room_id=room.room_id,
+                world_id=observation.world_id or room.world_id,
+                capture_version=room.version,
+                projection=room.projection,
+                client_id=room.semantic_draft.client_id if room.semantic_draft else None,
+                prior_answers=room.semantic_answers,
+                visual_hints=observation.hints,
+            )
         return VisualObservationUpdatedMessage(
             roomId=room.room_id,
             version=room.version,
             visualObservation=room.visual_observation,
+            semanticDraft=room.semantic_draft,
         )
 
     async def broadcast(self, room_id: str, update: ProjectionUpdatedMessage) -> None:

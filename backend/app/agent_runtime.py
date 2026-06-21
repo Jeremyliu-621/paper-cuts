@@ -280,7 +280,7 @@ def _visual_json_schema() -> dict[str, Any]:
                         "description": {"type": "string"},
                         "behavior": {
                             "type": ["string", "null"],
-                            "enum": ["solid", "pass", "bounce", "hurt", "ice", "breakable", "decor", "ignore", None],
+                            "enum": ["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore", None],
                         },
                         "sourceIds": {"type": "array", "items": {"type": "string"}},
                     },
@@ -316,6 +316,8 @@ def _clean_hint(raw: dict[str, Any]) -> VisualObservationHint | None:
             behavior = "ice"
         elif "break" in value:
             behavior = "breakable"
+        elif "cannon" in value:
+            behavior = "cannon"
         elif "decor" in value:
             behavior = "decor"
         elif "ignore" in value:

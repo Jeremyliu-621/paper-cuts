@@ -216,6 +216,7 @@
         updateProjection(message.version || state.version, state.projection, message.semanticDraft || null, state.visualObservation, null);
       } else if (message.type === 'visual_observation_updated') {
         state.visualObservation = message.visualObservation || null;
+        if (message.semanticDraft) state.semanticDraft = message.semanticDraft;
         state.version = message.version || state.version;
         syncUi();
       }
@@ -301,15 +302,32 @@
     if (shouldClearSelection) clearSelection(backendUrl);
   }
 
-  function fitView(cssW, cssH) {
+  function stageForWorld() {
+    const mapId = state.world && (state.world.mapId || state.world.id);
+    if (mapId && DS.Maps && DS.Store && DS.Store.data) return DS.Maps.stageFor(DS.Store.data, mapId);
     const ref = DS.stageReference || {};
-    const view = ref.view || { w: 1920, h: 1080 };
+    return { bounds: { x0: 0, y0: 0, x1: 1920, y1: 1080 }, platforms: ref.platforms || [] };
+  }
+
+  function stageExt(stage) {
+    const b = stage && stage.bounds ? stage.bounds : { x0: 0, y0: 0, x1: 1920, y1: 1080 };
+    let x0 = b.x0, y0 = b.y0, x1 = b.x1, y1 = b.y1;
+    for (const p of stage.platforms || []) {
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y);
+      x1 = Math.max(x1, p.x + p.w); y1 = Math.max(y1, p.y + p.h);
+    }
+    return { x0, y0, x1, y1 };
+  }
+
+  function fitView(cssW, cssH, stage) {
+    const ext = stageExt(stage || stageForWorld());
+    const view = { x: ext.x0, y: ext.y0, w: Math.max(1, ext.x1 - ext.x0), h: Math.max(1, ext.y1 - ext.y0) };
     const scale = Math.min(cssW / view.w, cssH / view.h);
     return {
       view,
       scale,
-      ox: (cssW - view.w * scale) / 2,
-      oy: (cssH - view.h * scale) / 2,
+      ox: (cssW - view.w * scale) / 2 - view.x * scale,
+      oy: (cssH - view.h * scale) / 2 - view.y * scale,
     };
   }
 
@@ -459,17 +477,17 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = D.COL.inkSoft;
-    ctx.fillText('Draw on the iPad to add platform candidates', view.w / 2, 180);
+    ctx.fillText('Draw on the iPad to add platform candidates', view.x + view.w / 2, view.y + 180);
     ctx.restore();
   }
 
   function render(ctx, cssW, cssH) {
     if (!state.enabled) return false;
     if (cssW <= 0 || cssH <= 0) return true;
-    const fitted = fitView(cssW, cssH);
+    const stage = stageForWorld();
+    const fitted = fitView(cssW, cssH, stage);
     const view = fitted.view;
-    const reference = DS.stageReference || {};
-    const platforms = reference.platforms || [];
+    const platforms = stage.platforms || [];
 
     ctx.clearRect(0, 0, cssW, cssH);
     ctx.drawImage(D.paperTexture(cssW, cssH), 0, 0);
@@ -480,7 +498,7 @@
 
     ctx.save();
     ctx.fillStyle = 'rgba(239,231,216,0.45)';
-    ctx.fillRect(0, 0, view.w, view.h);
+    ctx.fillRect(view.x, view.y, view.w, view.h);
     ctx.restore();
 
     platforms.forEach((platform, index) => drawReferencePlatform(ctx, platform, index));

@@ -53,6 +53,13 @@
 
     activate() { this.active = true; this.panel.hidden = false; this.charName = this.data.roster[0]; this.build(); }
     deactivate() { this.active = false; this.panel.hidden = true; }
+    editWorldStage(world) {
+      this.subtab = 'stage';
+      this.editMap = (world && (world.mapId || world.id)) || this.game.mapId || 'meadow';
+      this.selPlat = null; this.selPortal = null; this.drag = null; this.platStroke = null; this.platDraw = false;
+      if (DS.WorldLibrary && DS.WorldLibrary.ensureWorldStage && world) DS.WorldLibrary.ensureWorldStage(world);
+      this.activate();
+    }
 
     queueSave() { clearTimeout(this._saveTimer); this._saveTimer = setTimeout(() => DS.Store.save(), 250); }
 
@@ -228,7 +235,12 @@
       // map picker — EVERY stage is editable, not just Meadow
       const mrow = el('div', 'ed-row'); mrow.appendChild(el('label', '', 'Map'));
       const msel = el('select');
-      DS.Maps.list().forEach((m) => { const o = el('option', '', m.name); o.value = m.id; if (m.id === this.editMap) o.selected = true; msel.appendChild(o); });
+      const maps = DS.Maps.list().slice();
+      if (!maps.some((m) => m.id === this.editMap)) {
+        const custom = DS.Maps.get(this.editMap);
+        maps.unshift({ id: this.editMap, name: (this._stage() && this._stage().name) || custom.name || 'Custom Level' });
+      }
+      maps.forEach((m) => { const o = el('option', '', m.name); o.value = m.id; if (m.id === this.editMap) o.selected = true; msel.appendChild(o); });
       msel.onchange = () => { this.editMap = msel.value; this.selPlat = null; this.build(); };
       mrow.appendChild(msel); p.appendChild(mrow);
 
@@ -556,7 +568,7 @@
       ctx.restore();
       ctx.fillStyle = D.COL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
       ctx.font = "26px 'Gloria Hallelujah', cursive";
-      ctx.fillText('Editing: ' + DS.Maps.get(this.editMap).name, cssW / 2, 34);
+      ctx.fillText('Editing: ' + (st.name || DS.Maps.get(this.editMap).name), cssW / 2, 34);
     }
     // dashed boxes + resize nubs on platforms, dotted circles on spawns (sizes kept ~constant on screen)
     _renderStageHandles(ctx, st, sv) {

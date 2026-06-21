@@ -921,10 +921,11 @@
       ctx.fillStyle = D.COL.ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       if (this.state === 'ready') {
         const map = DS.Maps.get(this.mapId);
+        const mapName = (this.stage && this.stage.name) || map.name;
         ctx.font = (52 * U) + "px 'Gloria Hallelujah', cursive";
         ctx.fillText(this.mode.name, vw / 2, vh / 2 - 56 * U);
         ctx.font = (26 * U) + "px 'Patrick Hand', cursive";
-        ctx.fillText(map.name + '  ·  ' + this.mode.win, vw / 2, vh / 2 - 18 * U);
+        ctx.fillText(mapName + '  ·  ' + this.mode.win, vw / 2, vh / 2 - 18 * U);
         ctx.font = (34 * U) + "px 'Patrick Hand', cursive";
         const vs = this.fighters.length <= 2
           ? this.fighters[0].name + '  vs  ' + this.fighters[1].name

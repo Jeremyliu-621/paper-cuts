@@ -84,6 +84,7 @@ function confirmedCandidate(overrides = {}) {
     hurt: { kind: 'spikes', hurt: true },
     ice: { kind: 'crystal' },
     breakable: { kind: 'box', hp: 4 },
+    cannon: { kind: 'cannon', fire: true },
   }
 
   Object.entries(expectations).forEach(([behavior, expected], index) => {
@@ -98,6 +99,7 @@ function confirmedCandidate(overrides = {}) {
     if ('bounce' in expected) assert.equal(platform.bounce, expected.bounce)
     if ('hurt' in expected) assert.equal(Boolean(platform.hurt), expected.hurt)
     if ('hp' in expected) assert.equal(platform.hp, expected.hp)
+    if ('fire' in expected) assert.equal(Boolean(platform.fire), expected.fire)
   })
 }
 

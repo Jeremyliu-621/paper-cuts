@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.rooms import rooms
+from app.schemas import VisualObservation, VisualObservationHint
 
 
 def setup_function() -> None:
@@ -310,6 +312,62 @@ def test_semantic_draft_extracts_rectangles_and_thick_horizontal_strokes() -> No
     assert {candidate["extractor"] for candidate in draft["candidates"]} == {"rectangle", "stroke"}
     assert len(draft["questions"]) == 2
     assert all(question["prompt"] == "What should this platform do?" for question in draft["questions"])
+
+
+def test_visual_observation_classifies_existing_semantic_candidates() -> None:
+    client = TestClient(app)
+    projected = projection()
+    projected["shapes"] = [
+        {
+            "id": "doodle-cannon",
+            "sourceId": "doodle-cannon",
+            "kind": "rectangle",
+            "x": 820,
+            "y": 700,
+            "w": 160,
+            "h": 68,
+        },
+    ]
+
+    response = client.post(
+        "/rooms/vlm-classifies/capture",
+        json={"type": "canvas_capture", "capture": {"ok": True}, "projection": projected, "clientId": "ipad"},
+    )
+
+    assert response.status_code == 200
+    draft = response.json()["semanticDraft"]
+    assert draft["questions"]
+    assert draft["candidates"][0]["status"] == "needs_answer"
+
+    update = rooms.store_visual_observation(
+        "vlm-classifies",
+        VisualObservation(
+            status="ready",
+            roomId="vlm-classifies",
+            worldId=None,
+            captureVersion=1,
+            jobId=response.json()["visualObservation"]["jobId"],
+            model="gpt-test",
+            description="The doodle is intended as a cannon.",
+            hints=[
+                VisualObservationHint(
+                    kind="platform",
+                    confidence=0.91,
+                    description="cannon platform doodle",
+                    behavior="cannon",
+                    sourceIds=["doodle-cannon"],
+                )
+            ],
+            updatedAt=datetime.now(UTC),
+        ),
+    )
+
+    assert update is not None
+    draft = update.model_dump(mode="json", by_alias=True)["semanticDraft"]
+    assert draft["questions"] == []
+    assert draft["candidates"][0]["extractor"] == "rectangle"
+    assert draft["candidates"][0]["status"] == "confirmed"
+    assert draft["candidates"][0]["answer"]["behavior"] == "cannon"
 
 
 def test_semantic_draft_extracts_conservative_grouped_strokes() -> None:

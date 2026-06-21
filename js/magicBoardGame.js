@@ -56,6 +56,10 @@
     } else if (behavior === 'breakable') {
       platform.kind = 'box';
       platform.hp = 4;
+    } else if (behavior === 'cannon') {
+      platform.kind = 'cannon';
+      platform.pass = false;
+      platform.fire = { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 };
     }
     return platform;
   }
@@ -97,8 +101,10 @@
     if (patch.version !== 1) errors.push('patch.version must be 1');
     if (!patch.target || !patch.target.mapId) errors.push('patch.target.mapId is required');
     if (!Array.isArray(patch.operations)) errors.push('patch.operations must be an array');
-    if (patch.target && patch.target.mapId && DS.Maps && DS.Maps.list) {
-      const exists = DS.Maps.list().some((map) => map.id === patch.target.mapId);
+    if (patch.target && patch.target.mapId && DS.Maps) {
+      const exists = DS.Maps.has
+        ? DS.Maps.has(patch.target.mapId)
+        : (DS.Maps.list && DS.Maps.list().some((map) => map.id === patch.target.mapId));
       if (!exists) errors.push('unknown mapId ' + patch.target.mapId);
     }
     (patch.operations || []).forEach((operation, index) => {

@@ -26,6 +26,7 @@ try {
   const apply = await page.evaluate(() => {
     localStorage.removeItem(window.DS.WorldLibrary.KEY)
     const world = window.DS.WorldLibrary.createWorld()
+    const initialCustomPlatformCount = window.DS.Maps.stageFor(window.DS.Store.data, world.mapId).platforms.length
     const draft = {
       roomId: world.roomId,
       worldId: world.id,
@@ -47,12 +48,12 @@ try {
     const patch = window.MagicBoardGame.buildPatchFromSemanticDraft(draft, {
       worldId: world.id,
       roomId: world.roomId,
-      mapId: 'meadow',
+      mapId: world.mapId,
     })
     const result = window.MagicBoardGame.applyPatch(patch)
-    const stage = window.DS.Maps.stageFor(window.DS.Store.data, 'meadow')
+    const stage = window.DS.Maps.stageFor(window.DS.Store.data, world.mapId)
     const updated = window.DS.WorldLibrary.updateWorld(world.id, {
-      mapId: 'meadow',
+      mapId: world.mapId,
       draft: {
         platforms: patch.operations.map((operation) => operation.platform),
         spawns: stage.spawns.slice(0, 2),
@@ -64,6 +65,8 @@ try {
       ready: window.DS.WorldLibrary.isReady(updated),
       status: window.DS.WorldLibrary.statusFor(updated).id,
       generatedPlatform: stage.platforms.find((platform) => platform.source?.candidateId === 'candidate-smoke'),
+      initialCustomPlatformCount,
+      customPlatformCount: stage.platforms.length,
     }
   })
 
@@ -74,6 +77,8 @@ try {
   assert.equal(apply.generatedPlatform.kind, 'float')
   assert.equal(apply.generatedPlatform.pass, true)
   assert.equal(apply.generatedPlatform.source.kind, 'magicboard_agent')
+  assert.equal(apply.initialCustomPlatformCount, 0)
+  assert.equal(apply.customPlatformCount, 1)
 
   console.log('Desktop browser smoke tests passed')
 } finally {

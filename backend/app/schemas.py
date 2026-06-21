@@ -37,10 +37,11 @@ class SemanticChoice(BaseModel):
         "damaging",
         "icy",
         "breakable",
+        "cannon",
     ]
     label: str
     role: Literal["platform", "ignore", "decor"]
-    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "decor", "ignore"]
+    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore"]
 
 
 class SemanticQuestion(BaseModel):
@@ -66,7 +67,7 @@ class SemanticAnswer(BaseModel):
     candidate_id: str = Field(alias="candidateId")
     choice_id: str = Field(alias="choiceId")
     role: Literal["platform", "ignore", "decor"] = "platform"
-    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "decor", "ignore"] = "solid"
+    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore"] = "solid"
     room_id: str = Field(alias="roomId")
     world_id: str | None = Field(default=None, alias="worldId")
     capture_version: int = Field(alias="captureVersion")
@@ -82,7 +83,7 @@ class SemanticCandidate(BaseModel):
     candidate_id: str = Field(alias="candidateId")
     type: Literal["platform_candidate"] = "platform_candidate"
     status: Literal["needs_answer", "confirmed", "ignored", "decor"] = "needs_answer"
-    extractor: Literal["rectangle", "stroke", "grouped_strokes"]
+    extractor: Literal["rectangle", "stroke", "grouped_strokes", "stage_tool"]
     confidence: float
     geometry: SemanticGeometry
     source_ids: list[str] = Field(alias="sourceIds")
@@ -117,7 +118,7 @@ class VisualObservationHint(BaseModel):
     kind: Literal["platform", "hazard", "decor", "unknown"]
     confidence: float
     description: str
-    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "decor", "ignore"] | None = None
+    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "cannon", "decor", "ignore"] | None = None
     source_ids: list[str] = Field(default_factory=list, alias="sourceIds")
     geometry: SemanticGeometry | None = None
 
@@ -196,6 +197,7 @@ class ClarificationAnswerMessage(BaseModel):
         "damaging",
         "icy",
         "breakable",
+        "cannon",
     ] = Field(alias="choiceId")
     capture_version: int = Field(alias="captureVersion")
     source_ids: list[str] = Field(alias="sourceIds")
@@ -251,6 +253,7 @@ class VisualObservationUpdatedMessage(BaseModel):
     room_id: str = Field(alias="roomId")
     version: int
     visual_observation: VisualObservation = Field(alias="visualObservation")
+    semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
 
 
 class AgentCapabilityStatus(BaseModel):

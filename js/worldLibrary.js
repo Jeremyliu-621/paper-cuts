@@ -8,7 +8,6 @@
 
   const STATUS = {
     draft: { id: 'draft', label: 'Draft' },
-    missingPlatform: { id: 'missing platform', label: 'Missing platform' },
     missingSpawnPoints: { id: 'missing spawn points', label: 'Missing spawn points' },
     missingCharacters: { id: 'missing characters', label: 'Missing characters' },
     ready: { id: 'ready to play', label: 'Ready to play' },
@@ -22,11 +21,20 @@
     return String(value || 'world').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'world';
   }
 
+  function defaultSpawns() {
+    return [{ x: 660, y: 780 }, { x: 1260, y: 780 }];
+  }
+
+  function defaultCharacters() {
+    const roster = DS.Store && DS.Store.data && Array.isArray(DS.Store.data.roster) ? DS.Store.data.roster : ['Sprout', 'Acorn'];
+    return roster.slice(0, REQUIRED_CHARACTER_COUNT);
+  }
+
   function defaultDraft() {
     return {
       platforms: [],
-      spawns: [],
-      characters: [],
+      spawns: defaultSpawns(),
+      characters: defaultCharacters(),
     };
   }
 
@@ -56,7 +64,6 @@
   function missingRequirements(world) {
     const draft = draftFor(world);
     const missing = [];
-    if (draft.platforms.length < 1) missing.push('1 platform');
     if (draft.spawns.length < 2) missing.push('2 spawn points');
     if (draft.characters.length < REQUIRED_CHARACTER_COUNT) missing.push('required characters');
     return missing;
@@ -65,7 +72,6 @@
   function statusFor(world) {
     const draft = draftFor(world);
     if (draft.platforms.length < 1 && draft.spawns.length < 1 && draft.characters.length < 1) return STATUS.draft;
-    if (draft.platforms.length < 1) return STATUS.missingPlatform;
     if (draft.spawns.length < 2) return STATUS.missingSpawnPoints;
     if (draft.characters.length < REQUIRED_CHARACTER_COUNT) return STATUS.missingCharacters;
     return STATUS.ready;
@@ -91,10 +97,21 @@
       drawingCapture: drawingCaptureFor(world),
       draft: draftFor(world),
       modeId: world.modeId || 'smash',
-      mapId: world.mapId || 'meadow',
+      mapId: world.id || id,
     };
+    ensureWorldStage(out);
     out.status = statusFor(out).id;
     return out;
+  }
+
+  function ensureWorldStage(world) {
+    if (!world || !DS.Store || !DS.Store.data || !DS.Maps || !DS.Maps.ensureCustomStage) return null;
+    const mapId = world.mapId || world.id;
+    const existed = DS.Store.data.stages && DS.Store.data.stages[mapId];
+    const oldName = existed && existed.name;
+    const stage = DS.Maps.ensureCustomStage(DS.Store.data, mapId, world.name, draftFor(world));
+    if (stage && (!existed || (world.name && oldName !== world.name)) && DS.Store.save) DS.Store.save();
+    return stage;
   }
 
   function readWorlds() {
@@ -226,16 +243,24 @@
         return thumb;
       }
 
-      const view = DS.stageReference && DS.stageReference.view ? DS.stageReference.view : { w: 1920, h: 1080 };
-      const platforms = DS.stageReference && DS.stageReference.platforms ? DS.stageReference.platforms : [];
+      const stage = ensureWorldStage(world);
+      const baseBounds = stage && stage.bounds ? stage.bounds : { x0: 0, y0: 0, x1: 1920, y1: 1080 };
+      const platforms = stage && Array.isArray(stage.platforms) ? stage.platforms : [];
+      const bounds = { x0: baseBounds.x0, y0: baseBounds.y0, x1: baseBounds.x1, y1: baseBounds.y1 };
+      platforms.forEach((platform) => {
+        bounds.x0 = Math.min(bounds.x0, platform.x);
+        bounds.y0 = Math.min(bounds.y0, platform.y);
+        bounds.x1 = Math.max(bounds.x1, platform.x + platform.w);
+        bounds.y1 = Math.max(bounds.y1, platform.y + platform.h);
+      });
       const sketch = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      sketch.setAttribute('viewBox', '0 0 ' + view.w + ' ' + view.h);
+      sketch.setAttribute('viewBox', bounds.x0 + ' ' + bounds.y0 + ' ' + (bounds.x1 - bounds.x0) + ' ' + (bounds.y1 - bounds.y0));
       sketch.setAttribute('aria-hidden', 'true');
       const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      bg.setAttribute('x', '0');
-      bg.setAttribute('y', '0');
-      bg.setAttribute('width', String(view.w));
-      bg.setAttribute('height', String(view.h));
+      bg.setAttribute('x', String(bounds.x0));
+      bg.setAttribute('y', String(bounds.y0));
+      bg.setAttribute('width', String(bounds.x1 - bounds.x0));
+      bg.setAttribute('height', String(bounds.y1 - bounds.y0));
       bg.setAttribute('class', 'world-thumb-bg');
       sketch.appendChild(bg);
       platforms.forEach((platform) => {
@@ -375,6 +400,7 @@
     list: readWorlds,
     saveAll: writeWorlds,
     updateWorld,
+    ensureWorldStage,
     saveDrawingCapture,
     statusFor,
     missingRequirements,

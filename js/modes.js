@@ -474,7 +474,37 @@
         },
       },
     },
-    get(id) { return this.defs[id] || this.defs.meadow; },
+    isCustom(id) { return /^world-/.test(String(id || '')); },
+    emptyStage(name) {
+      return {
+        name: name || 'Custom Level',
+        bounds: { x0: 0, y0: 0, x1: DS.VIEW.w, y1: DS.VIEW.h },
+        platforms: [],
+        spawns: [{ x: 660, y: 780 }, { x: 1260, y: 780 }],
+        bg: [],
+        decor: [],
+      };
+    },
+    stageFromDraft(draft, name) {
+      draft = draft && typeof draft === 'object' ? draft : {};
+      const st = this.emptyStage(name);
+      if (Array.isArray(draft.platforms)) st.platforms = DS.data.clone(draft.platforms);
+      if (Array.isArray(draft.spawns) && draft.spawns.length) st.spawns = DS.data.clone(draft.spawns);
+      return st;
+    },
+    ensureCustomStage(data, id, name, draft) {
+      if (!this.isCustom(id)) return null;
+      if (!data.stages) data.stages = {};
+      if (!data.stages[id]) data.stages[id] = this.stageFromDraft(draft, name);
+      else if (name) data.stages[id].name = name;
+      return data.stages[id];
+    },
+    has(id) { return !!this.defs[id] || this.isCustom(id); },
+    get(id) {
+      if (this.defs[id]) return this.defs[id];
+      if (this.isCustom(id)) return { id, name: 'Custom Level', editable: true, custom: true };
+      return this.defs.meadow;
+    },
     list() { return this._order.map((id) => this.defs[id]); },
 
     // The editable, PERSISTENT stage for a map. Meadow is the live Editor-owned data.stage;
@@ -482,6 +512,7 @@
     // stick (saved with the Store) — so all stages are editable, not just Meadow. The Game plays
     // a CLONE of this (so moving platforms / cannons / breakables during a match never mutate it).
     stageFor(data, id) {
+      if (this.isCustom(id)) return this.ensureCustomStage(data, id);
       const map = this.get(id);
       if (map.editable || !map.build) return data.stage;
       if (!data.stages) data.stages = {};
@@ -490,6 +521,11 @@
     },
     // restore one map's stage to its built-in default (Editor "Reset this stage")
     resetStage(data, id) {
+      if (this.isCustom(id)) {
+        data.stages = data.stages || {};
+        data.stages[id] = this.emptyStage(data.stages[id] && data.stages[id].name);
+        return data.stages[id];
+      }
       const map = this.get(id);
       if (map.editable || !map.build) { data.stage = DS.data.defaults().stage; return data.stage; }
       data.stages = data.stages || {};
