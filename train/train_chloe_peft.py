@@ -39,8 +39,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--epochs", type=float, default=3.0)
     p.add_argument("--max_steps", type=int, default=-1, help="override epochs if > 0")
     p.add_argument("--lr", type=float, default=2e-4)
-    p.add_argument("--batch_size", type=int, default=8)
-    p.add_argument("--gradient_accumulation_steps", type=int, default=2)
+    p.add_argument("--batch_size", type=int, default=2)              # T4-safe at seq_len 1024
+    p.add_argument("--gradient_accumulation_steps", type=int, default=8)   # effective batch = 2*8 = 16
     p.add_argument("--max_seq_len", type=int, default=1024)
     p.add_argument("--lora_r", type=int, default=16)
     p.add_argument("--lora_alpha", type=int, default=32)
