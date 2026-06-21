@@ -56,6 +56,8 @@ def pick_device(want: str):
                 raise
     if (want in ("auto", "cuda")) and torch.cuda.is_available():
         return "cuda"
+    if (want in ("auto", "mps")) and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        return "mps"   # train the recognizer right on the Mac (Apple Silicon)
     return "cpu"
 
 
@@ -66,7 +68,7 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=8)
     ap.add_argument("--batch_size", type=int, default=256)
     ap.add_argument("--lr", type=float, default=1e-3)
-    ap.add_argument("--device", default="auto", choices=["auto", "xla", "cuda", "cpu"])
+    ap.add_argument("--device", default="auto", choices=["auto", "xla", "cuda", "mps", "cpu"])
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
     torch.manual_seed(args.seed)

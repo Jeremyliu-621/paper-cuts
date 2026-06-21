@@ -28,6 +28,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "services" / "recognizer"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))   # Colab: config.py uploaded next to this script
 import config  # noqa: E402
 
 BUCKET = "https://storage.googleapis.com/quickdraw_dataset/full/numpy_bitmap/{}.npy"
