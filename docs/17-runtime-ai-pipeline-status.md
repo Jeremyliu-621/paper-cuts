@@ -46,19 +46,26 @@ DS.AI.connectChloe('http://localhost:8500/mechanic');       // mechanics
 
 ## 2. The sprite pipeline (the hard-won part)
 
-**Current:** `server.js /fal-enhance` → **Recraft v3 text-to-image** (`fal-ai/recraft/v3/text-to-image`,
-style `digital_illustration/hand_drawn`) draws a *clean new doodle from the recognized word* →
-**Bria background removal** (`fal-ai/bria/background/remove`, saliency — removes the patterned/scene
-backgrounds Recraft scatters) → the client (`js/ai.js _isolateDoodle`) runs a **fast
-connected-components keep-largest** that drops any leftover *detached* decoration blobs (rain dashes,
-sparkles). Result: clean isolated doodle on transparent. ~11–12s/sprite (2 fal calls).
+**Current (`FAL_GEN_MODE=image`, the default):** `server.js /fal-enhance` → **Recraft v3
+image-to-image** (`fal-ai/recraft/v3/image-to-image`, style `digital_illustration/hand_drawn`,
+strength **0.72**) augments the kid's ALREADY-ISOLATED doodle → **Bria background removal**
+(`fal-ai/bria/background/remove`) → client `_isolateDoodle` keep-largest drops detached blobs.
+Result: clean isolated doodle on transparent, **preserving the kid's drawing**. ~11–12s/sprite.
 
-**Suite test (16 objects, 2026-06-21):** Recraft hand_drawn backgrounds are a *lottery* — sometimes
-plain, often striped/grid/rain/scene. Plain connected-components grabbed the pattern; "keep interior"
-deleted edge-filling objects; BiRefNet left rain dashes. **Bria + keep-largest** is the winner: clean
-for the common game items (sword, water, apple, star, key, shield, bomb, mushroom, crown, heart, fire,
-ice); a few geometric-background cases (axe, bow, gun) still imperfect. Good enough for the demo — kids
-draw the clean-working things. Test artifacts in `/tmp/suite/`, `/tmp/suite-final.png`.
+**Why i2i, not t2i (reversed after testing):** `FAL_GEN_MODE=text` draws a clean redraw *from the
+label* — but Recraft renders everyday objects (house/sun/heart) inside little **scenes** (a heart hung
+between open windows!) that break the cutout. i2i can't invent a scene (it transforms the isolated
+input), so it's reliably clean AND on-shape AND keeps the kid's creation (on-vision). `=text` still
+available; it's only reliable for game-item words (sword/apple/shield).
+
+**Suite tests (2026-06-21):**
+- *16 game-item labels via t2i:* exposed the Recraft background lottery (stripes/grid/rain/scene).
+  Fix = **Bria (saliency) + client keep-largest** two-stage cutout. Clean for common game items.
+- *9 crude kid doodles (house, star, fish, sun, tree, flower, cat, heart, umbrella):* the realistic
+  end-to-end test. **Recognition:** the VLM prompt was over-steering to a game-vocab list (→ house=crown,
+  fish=ball, 3/9). Open-vocab prompt → **8/9** (only my lollipop-shaped "tree" was fair-wrong).
+  **Generation:** t2i ~4/9 clean (scenes); **i2i 9/9 clean** → made i2i the default. Artifacts in
+  `/tmp/doodles/`, `/tmp/doodles-i2i.png` (i2i) vs `/tmp/doodles-out.png` (t2i).
 
 - `FAL_GEN_MODE=text` (default) = text-to-image (clean asset). `FAL_GEN_MODE=image` = image-to-image
   (traces the doodle — kept only for comparison; **rejected**, see §3).
