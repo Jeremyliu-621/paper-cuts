@@ -13,6 +13,7 @@
 
   const AI = {
     endpoint: null,   // CAELLUM /enhance URL; null = placeholder only
+    falEndpoint: null, // fal /fal-enhance URL; null = no fast pass (CAELLUM-only as before)
     chloeEndpoint: null, // CHLOE /mechanic URL; null = default (instant) mechanic only
     recognizerEndpoint: null, // RECOGNIZER /recognize URL; null = caller supplies the label (no auto-naming)
     SIZE: 512,        // rasterized sketch size sent to /enhance (matches the compiled shape)
@@ -24,6 +25,19 @@
       fetch(base + '/healthz').then(function (r) { return r.json(); })
         .then(function (h) { console.log('[DS.AI] CAELLUM connected:', h); })
         .catch(function (e) { if (global.__showErr) global.__showErr('CAELLUM /healthz failed: ' + (e && e.message || e)); });
+      return url;
+    },
+
+    // set the fal /fal-enhance endpoint (mirrors connect() but for the FAST first pass). The route is
+    // /fal-enhance; its serve may not expose /healthz, so we ping defensively and never hard-depend on
+    // it — set the endpoint + log regardless so a missing health route doesn't disable the fast pass.
+    connectFal: function (url) {
+      this.falEndpoint = url;
+      console.log('[DS.AI] fal connected:', url);
+      const base = url.replace(/\/fal-enhance\/?$/, '');
+      fetch(base + '/healthz').then(function (r) { return r.json(); })
+        .then(function (h) { console.log('[DS.AI] fal healthz:', h); })
+        .catch(function () { /* fal route may lack /healthz — non-fatal, endpoint is already set */ });
       return url;
     },
 
@@ -65,7 +79,11 @@
         const self = this;
         this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts); });
       } else {
-        if (this.endpoint) this._enhanceInto(prop, stripDataUrl(this._rasterizeUrl(strokes)), label);
+        if (this.falEndpoint || this.endpoint) {
+          const b64 = stripDataUrl(this._rasterizeUrl(strokes));
+          if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
+          if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
+        }
         if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
       }
       return prop;
@@ -87,7 +105,9 @@
       rough.onload = function () { if (!prop.enhanced) prop.sprite = rough; };
       rough.src = dataUrl;
       game.props.push(prop);
-      if (this.endpoint) this._enhanceInto(prop, stripDataUrl(dataUrl), label);
+      const b64 = stripDataUrl(dataUrl);
+      if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
+      if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
       if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
       return prop;
     },
@@ -105,6 +125,25 @@
           img.src = 'data:image/png;base64,' + out.sprite_b64;
         })
         .catch(function (e) { if (global.__showErr) global.__showErr('CAELLUM enhance failed: ' + (e && e.message || e)); });
+    },
+
+    // POST the rough sketch to fal (FAST first pass, same {image_b64,label}->{sprite_b64} contract as
+    // /enhance) and swap the result onto the prop. PRECEDENCE: CAELLUM (/enhance) is the more polished
+    // pass, so once it has applied (prop.enhanced === true) we must NOT clobber it — a slow fal reply
+    // that lands after CAELLUM is dropped. fal only marks prop._falDone, never prop.enhanced, so the
+    // later CAELLUM swap always wins regardless of arrival order. Never throws into the spawn path.
+    _falEnhanceInto: function (prop, image_b64, label) {
+      fetch(this.falEndpoint, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ image_b64: image_b64, label: label }),
+      }).then(function (r) { return r.json(); })
+        .then(function (out) {
+          if (!out || !out.sprite_b64) throw new Error((out && out.error) || 'no sprite in response');
+          const img = new Image();
+          img.onload = function () { if (!prop.enhanced) { prop.sprite = img; prop._falDone = true; } };
+          img.src = 'data:image/png;base64,' + out.sprite_b64;
+        })
+        .catch(function (e) { if (global.__showErr) global.__showErr('fal enhance failed: ' + (e && e.message || e)); });
     },
 
     // POST the label to CHLOE and, on success, UPGRADE the prop's mechanic in place. Progressive
@@ -192,7 +231,11 @@
       prop.recognized = top || null;            // {category,label,archetype,element,confidence} for the HUD
       if (DS.Mechanics) { prop.mechanic = DS.Mechanics.defaultFor(label); prop.archetype = prop.mechanic.archetype; }
       const desc = (opts && opts.description) || label;
-      if (this.endpoint) this._enhanceInto(prop, stripDataUrl(this._rasterizeUrl(strokes)), label);
+      if (this.falEndpoint || this.endpoint) {
+        const b64 = stripDataUrl(this._rasterizeUrl(strokes));
+        if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
+        if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
+      }
       if (this.chloeEndpoint) this._mechanicInto(prop, label, desc);
     },
 
