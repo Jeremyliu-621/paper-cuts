@@ -570,6 +570,7 @@
   const SCN = BG_INK;                 // every dressing mark is the background gray
   const SCN_LEAF = D.mix(SCN, '#3f7a2e', 0.32);          // foliage on top — the gray nudged a touch green (above the line)
   const LEAF_FILL = D.mix(D.COL.paper, '#3f7a2e', 0.12); // faint green fill for plant blobs
+  const STONE_FILL = D.mix(D.COL.paper, SCN, 0.34);      // solid masonry fill for pillars/arches — paper nudged a bit gray
   const GAP_MIN = 40, PILLAR_MAX = 700; // a gap beyond PILLAR_MAX reads as floating → island, not pillar
   const TOP_KINDS = ['tuft', 'stalk', 'shrub', 'sprout'];
   const TOP_KINDS_BIG = ['tuft', 'stalk', 'shrub', 'sprout', 'sapling'];
@@ -881,8 +882,11 @@
   // a lintel that ROTATES to sit flush against the (possibly tilted) underside it holds up.
   function drawPillar(ctx, it) {
     const rnd = DS.makeRng(it.seed), h = it.botY - it.topY, cx = it.x, topY = it.topY, botY = it.botY, tilt = it.tilt || 0;
-    const w = it.thin ? 6.5 : 10.5; // half the gap between the two uprights — CONSTANT (no taper, no fill); ~30% chunkier
-    // the shaft is just two straight parallel lines running up
+    const w = it.thin ? 6.5 : 10.5; // half the gap between the two uprights — CONSTANT (no taper); ~30% chunkier
+    // fill the shaft SOLID (light stone) so the column is opaque masonry, not a see-through gap
+    ctx.fillStyle = STONE_FILL;
+    ctx.beginPath(); ctx.moveTo(cx - w, topY); ctx.lineTo(cx + w, topY); ctx.lineTo(cx + w, botY); ctx.lineTo(cx - w, botY); ctx.closePath(); ctx.fill();
+    // the shaft sides are two straight parallel lines running up
     D.line(ctx, cx - w, topY + 2, cx - w, botY, { width: 3.5, color: SCN, rnd, passes: 1 });
     D.line(ctx, cx + w, topY + 2, cx + w, botY, { width: 3.5, color: SCN, rnd, passes: 1 });
     // a couple of little arched windows between the uprights on a chunky tall pier (a tower leg)
@@ -895,10 +899,10 @@
     }
     // little flared end-pieces: a capital flush to the underside above, a foot on the surface below
     ctx.save(); ctx.translate(cx, topY); ctx.rotate(tilt);
-    D.strokePts(ctx, [[-w - 4, 0], [w + 4, 0], [w + 1, 8], [-w - 1, 8]], { width: 3, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    D.strokePts(ctx, [[-w - 4, 0], [w + 4, 0], [w + 1, 8], [-w - 1, 8]], { width: 3, color: SCN, rnd, closed: true, fill: STONE_FILL, passes: 1 });
     ctx.restore();
     ctx.save(); ctx.translate(cx, botY); ctx.rotate(it.botTilt || 0);
-    D.strokePts(ctx, [[-w - 5, 0], [w + 5, 0], [w + 2, -9], [-w - 2, -9]], { width: 3, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    D.strokePts(ctx, [[-w - 5, 0], [w + 5, 0], [w + 2, -9], [-w - 2, -9]], { width: 3, color: SCN, rnd, closed: true, fill: STONE_FILL, passes: 1 });
     ctx.restore();
   }
 
@@ -967,6 +971,12 @@
       outer.push([midx + hw * Math.cos(a), base + rise * (1 - s) + 2]);
       inner.push([midx + (hw - 6) * Math.cos(a), base + (rise - 6) * (1 - s) + 8]);
     }
+    // fill the SPANDREL solid (light stone): the masonry between the deck above and the arch curve below,
+    // so the arcade reads as an opaque wall pierced by arch openings, not see-through line art.
+    ctx.fillStyle = STONE_FILL;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+    for (let i = N; i >= 0; i--) ctx.lineTo(outer[i][0], outer[i][1]);
+    ctx.closePath(); ctx.fill();
     D.strokePts(ctx, outer, { width: 4, color: SCN, rnd, passes: 1, jitter: 0.5 });
     ctx.globalAlpha = 0.4; D.strokePts(ctx, inner, { width: 2.5, color: SCN, passes: 1, jitter: 0.5 }); ctx.globalAlpha = 1;
     // little voussoir ticks + a keystone so the crown reads as masonry, not a bare loop
@@ -1114,9 +1124,10 @@
   }
   // one rolling-hill band: filled silhouette + a soft top outline, drawn wide around the camera so
   // it always covers the view. `trees` dots a few tiny pine silhouettes on the crests.
-  function hillBand(ctx, cx, hx, depth, baseY, amp, k, fill, lineCol, lineAlpha, trees) {
+  function hillBand(ctx, cx, hx, depth, baseY, amp, k, fill, lineCol, lineAlpha, trees, half) {
     const shift = layerShift(cx, hx, depth), c = cx != null ? cx : 0;
-    const L = c - shift - 3400, R = c - shift + 3400, step = 30, bottom = baseY + 2600;
+    const H = half || 3400;
+    const L = c - shift - H, R = c - shift + H, step = 30, bottom = baseY + 2600;
     ctx.save(); ctx.translate(shift, 0);
     ctx.beginPath(); ctx.moveTo(L, bottom);
     for (let x = L; x <= R; x += step) ctx.lineTo(x, baseY + hillH(x, amp, k));
@@ -1138,9 +1149,10 @@
     ctx.restore();
   }
   // a jagged distant mountain range (peaks + saddles), light snow tips, soft ridge outline
-  function mountainBand(ctx, cx, hx, depth, baseY, peakH, fill, lineCol) {
+  function mountainBand(ctx, cx, hx, depth, baseY, peakH, fill, lineCol, half) {
     const shift = layerShift(cx, hx, depth), c = cx != null ? cx : 0;
-    const L = c - shift - 3400, R = c - shift + 3400, sp = 300, bottom = baseY + 2600;
+    const H = half || 3400;
+    const L = c - shift - H, R = c - shift + H, sp = 300, bottom = baseY + 2600;
     const pts = [];
     for (let x = Math.floor(L / sp) * sp - sp; x <= R + sp; x += sp) {
       const r = DS.makeRng(DS.hashSeed('mtn' + x));
@@ -1208,22 +1220,79 @@
     bgSun(ctx, (b.x0 + b.x1) / 2 - (b.x1 - b.x0) * 0.27 - 130, horizon - 300);
     ctx.restore();
 
+    // visible-range clamp: sample/draw the parallax bands across the on-screen world width
+    // (+margin) instead of a fixed ±3400 — most of that was off-screen path work when zoomed in.
+    const halfW = (cam && cam.zoom) ? Math.min(3400, DS.VIEW.w * 0.5 / Math.max(0.18, cam.zoom) + 460) : 3400;
+
     // clouds — far sky layer, sitting just above the horizon (behind the mountains)
     const cloudShift = layerShift(cx, hx, 0.09), sc = cx != null ? cx : (b.x0 + b.x1) / 2;
     ctx.save(); ctx.translate(cloudShift, 0);
-    for (let x = Math.floor((sc - cloudShift - 3000) / 620) * 620; x <= sc - cloudShift + 3000; x += 620) {
+    for (let x = Math.floor((sc - cloudShift - halfW) / 620) * 620; x <= sc - cloudShift + halfW; x += 620) {
       const r = DS.makeRng(DS.hashSeed('cld' + x));
       softCloud(ctx, x + r() * 200, horizon - (110 + r() * 230), 0.85 + r() * 0.7);
     }
     ctx.restore();
 
     // mountains — a range behind the hills
-    mountainBand(ctx, cx, hx, 0.14, horizon + 6, 210, MTN_FAR, SOFT_LINE);
+    mountainBand(ctx, cx, hx, 0.14, horizon + 6, 210, MTN_FAR, SOFT_LINE, halfW);
 
     // three rolling-hill ranges (far→near, each drifts a little faster)
-    hillBand(ctx, cx, hx, 0.26, horizon + 4, 72, 1.3, HILL_FAR, SOFT_LINE, 0.3, false);
-    hillBand(ctx, cx, hx, 0.38, horizon + 34, 102, 2.2, HILL_MID, BG_INK, 0.36, false);
-    hillBand(ctx, cx, hx, 0.50, horizon + 72, 128, 3.1, HILL_NEAR, BG_INK, 0.48, true);
+    hillBand(ctx, cx, hx, 0.26, horizon + 4, 72, 1.3, HILL_FAR, SOFT_LINE, 0.3, false, halfW);
+    hillBand(ctx, cx, hx, 0.38, horizon + 34, 102, 2.2, HILL_MID, BG_INK, 0.36, false, halfW);
+    hillBand(ctx, cx, hx, 0.50, horizon + 72, 128, 3.1, HILL_NEAR, BG_INK, 0.48, true, halfW);
+  }
+
+  // ---- static-stage bitmap cache (perf #1) ---------------------------------
+  // Platforms + procedural dressing + authored decor live in FIXED world coords and only change
+  // when the level is edited — yet they were re-stroked (100s of ops) EVERY frame. Bake that static
+  // layer into one offscreen world-rect bitmap and blit it under the live camera transform (one
+  // drawImage instead of hundreds of strokes). Parallax clouds stay live; stages with moving
+  // platforms or animated portals fall back to the full live path so nothing freezes.
+  const SC_MAX_SIDE = 3200; // cap a cache side (backing px) so a huge map can't blow up memory
+  let _scOwner = null;      // single-slot: only the active stage holds a cache bitmap at a time
+
+  function stageContentRect(st) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of st.platforms) { if (p.x < x0) x0 = p.x; if (p.y < y0) y0 = p.y; if (p.x + p.w > x1) x1 = p.x + p.w; if (p.y + p.h > y1) y1 = p.y + p.h; }
+    if (!isFinite(x0)) return null;
+    for (const d of st.decor || []) { if (d.type === 'cloud') continue; if (d.x - 130 < x0) x0 = d.x - 130; if (d.y - 170 < y0) y0 = d.y - 170; if (d.x + 130 > x1) x1 = d.x + 130; if (d.y + 60 > y1) y1 = d.y + 60; }
+    const PADX = 340, PADTOP = 240, PADBOT = 380; // hanging foliage/pillars below; top plants poke above
+    return { x: x0 - PADX, y: y0 - PADTOP, w: (x1 - x0) + PADX * 2, h: (y1 - y0) + PADTOP + PADBOT };
+  }
+
+  function stageCacheKey(st, rect) {
+    let key = (DS.DPR || 1) + '|' + Math.round(rect.w) + 'x' + Math.round(rect.h) + '|' + (st._dressKey || '') + '|';
+    for (const p of st.platforms) key += p.x + ',' + p.y + ',' + p.w + ',' + p.h + ',' + (p.kind || '') + ',' + (p.style || '') + ',' + (p.pass ? 1 : 0) + ',' + (p.hp || 0) + ',' + (p.pts ? p.pts.length : 0) + ';';
+    key += '|';
+    for (const d of st.decor || []) if (d.type !== 'cloud') key += d.type + ',' + d.x + ',' + d.y + ',' + (d.s || 1) + ';';
+    return key;
+  }
+
+  // the cacheable layer: dressing + (static) platforms + authored non-cloud decor, in world coords
+  function drawStaticStage(ctx, st, dress) {
+    for (const it of dress.behind) drawDressBehind(ctx, it);
+    for (const p of st.platforms) platform(ctx, p);
+    for (const it of dress.front) drawDressFront(ctx, it);
+    for (const d of st.decor || []) {
+      if (d.type === 'cloud') continue;
+      const fn = DECOR[d.type]; if (!fn) continue;
+      ctx.save(); ctx.translate(d.x, d.y); ctx.scale(d.s || 1, d.s || 1);
+      fn(ctx, 0, 0, d.x, d.y);
+      ctx.restore();
+    }
+  }
+
+  function buildStageCache(st, dress, rect) {
+    const res = Math.min(DS.DPR || 1, SC_MAX_SIDE / rect.w, SC_MAX_SIDE / rect.h);
+    const cv = document.createElement('canvas');
+    cv.width = Math.max(1, Math.ceil(rect.w * res));
+    cv.height = Math.max(1, Math.ceil(rect.h * res));
+    const cx = cv.getContext('2d');
+    cx.scale(res, res);
+    cx.translate(-rect.x, -rect.y);
+    D.setLod(1); // bake full detail; it's just downscaled when the camera zooms out
+    drawStaticStage(cx, st, dress);
+    return { canvas: cv, rect };
   }
 
   function drawStage(ctx, data, cam, home) {
@@ -1232,6 +1301,26 @@
     const dress = dressOf(st); // procedural pillars/plants derived from the layout (cached)
     // clouds live in the sky → a gentle far-layer parallax so they drift slower than the field
     for (const d of st.decor || []) if (d.type === 'cloud') cloud(ctx, px(d.x, cx, hx, 0.35), px(d.y, cy, hy, 0.35), d.s);
+
+    // static-layer cache: only in a live match (cam present), and only when nothing in the layer
+    // moves/animates (moving platforms + animated portals keep the live path below).
+    const cacheable = cam && !st.platforms.some((p) => p.move) && !(st.portals && st.portals.length);
+    if (cacheable) {
+      const rect = stageContentRect(st);
+      if (rect && rect.w > 0 && rect.h > 0) {
+        if (_scOwner && _scOwner !== st) { _scOwner._sc = null; _scOwner._scKey = null; } // free the old stage's bitmap
+        _scOwner = st;
+        const key = stageCacheKey(st, rect);
+        if (!st._sc || st._scKey !== key) {
+          st._sc = buildStageCache(st, dress, rect); st._scKey = key;
+          D.setLod(cam.zoom < 0.7 ? 0 : 1); // restore the camera-appropriate LOD after baking at full
+        }
+        const r = st._sc.rect;
+        ctx.drawImage(st._sc.canvas, r.x, r.y, r.w, r.h);
+        return;
+      }
+    }
+    // ---- live path (moving platforms / portals / static previews / degenerate rect) ----
     for (const it of dress.behind) drawDressBehind(ctx, it); // pillars + island undersides, BEHIND platforms
     for (const p of st.platforms) if (p.move && p.move.type === 'swing') ropes(ctx, p);
     for (const p of st.platforms) platform(ctx, p);
