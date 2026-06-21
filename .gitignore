@@ -14,3 +14,10 @@ data/caellum_teacher/
 data/caellum_pairs/
 *.neuron
 *.safetensors
+chloe_graph_lora/
+caellum_lora_out/
+recognizer_model/
+data/quickdraw/
+*.npz
+*.pt
+.venv-caellum/
