@@ -12,6 +12,7 @@ from .config import load_backend_env
 from .agent_runtime import agent_status, run_visual_observation
 from .finishers import create_finisher_job, get_finisher_job
 from .orchestrator import AgentOrchestrator
+from .paper_trail import router as paper_trail_router
 from .rooms import rooms, selection_payload
 from .schemas import (
     AgentJobRequest,
@@ -37,6 +38,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(paper_trail_router)
 
 
 @app.get("/health")

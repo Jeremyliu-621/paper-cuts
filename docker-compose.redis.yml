@@ -1,0 +1,11 @@
+# Paper Trail vector memory — Redis Stack (RediSearch HNSW + RedisInsight).
+# Start with: docker compose -f docker-compose.redis.yml up -d
+# RedisInsight UI: http://localhost:8001  ·  Redis: redis://localhost:6379
+services:
+  redis:
+    image: redis/redis-stack:latest
+    container_name: paper-trail-redis
+    ports:
+      - "6379:6379"   # Redis (REDIS_URL=redis://localhost:6379)
+      - "8001:8001"   # RedisInsight web UI
+    restart: unless-stopped

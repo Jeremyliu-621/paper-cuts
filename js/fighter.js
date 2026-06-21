@@ -832,20 +832,8 @@
         }
         ctx.restore();
       }
-      // item FINISHER armed: a bright GREEN halo (faster pulse, distinct from the blue ult halo and from
-      // P1's green tag colour). Shows once the Pika clip is buffered; press the finisher key in range to fire.
-      if (this.finisherReady && !this.finisherUsed) {
-        const gp = 0.5 + 0.5 * Math.sin(this.animPhase * 3.2);
-        ctx.save();
-        ctx.translate(0, -10); ctx.strokeStyle = '#2fcf63';
-        for (let k = 0; k < 2; k++) {
-          ctx.globalAlpha = (0.32 - k * 0.1) + 0.12 * gp;
-          ctx.lineWidth = (7 - k * 2) * this.scale;
-          const rr = (32 + k * 16) * this.scale * (1 + 0.07 * gp);
-          ctx.beginPath(); ctx.ellipse(0, 0, rr * 0.82, rr, 0, 0, 6.2832); ctx.stroke();
-        }
-        ctx.restore();
-      }
+      // item FINISHER: armed silently for the demo (no aura / prompt) — the holder just presses their
+      // finisher key (P1 'T', P2 'M') in range of an opponent to fire the KO video.
       // one-shot "you're charged" bloom — drawn ON the body (in local space) so it tracks the
       // fighter even at full sprint, instead of leaving a ring where they used to stand
       if (this._burstT > 0) {

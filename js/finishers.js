@@ -300,12 +300,38 @@
     if (!clip || !clip.videoUrl) return null;
     if (preloaded[clip.key] && preloaded[clip.key].src === clip.videoUrl) return preloaded[clip.key];
     const video = document.createElement('video');
-    video.src = clip.videoUrl;
+    // Safari needs muted/playsinline as real ATTRIBUTES (not just JS props) to allow inline muted autoplay.
+    video.muted = true; video.defaultMuted = true; video.playsInline = true;
+    video.setAttribute('muted', '');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.setAttribute('autoplay', '');
     video.preload = 'auto';
-    video.playsInline = true;
-    video.muted = true;
+    video.src = clip.videoUrl;
+    // Attach off-screen: a fully-DETACHED <video> often never buffers (readyState stays 0), which leaves
+    // the finisher overlay stuck on its fallback and play() racing an unloaded element. In the DOM it
+    // reliably loads/decodes and stays clean for canvas drawImage (same-origin asset).
+    video.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+    if (global.document && document.body) document.body.appendChild(video);
+    try { video.load(); } catch (_e) { /* best-effort */ }
     preloaded[clip.key] = video;
     return video;
+  }
+
+  // DEMO finisher: a pre-baked, reused FIRE clip (assets/finishers/fire.mp4). The first item a fighter
+  // picks up arms this — no per-match AI generation, no backend, no ~100s wait, identical every run.
+  // Full origin URL so videoForClip's `src === videoUrl` cache check matches (it normalizes to absolute).
+  const LOCAL_FIRE_CLIP = (global.location && global.location.origin ? global.location.origin : '') + '/assets/finishers/fire.mp4';
+  function armLocalFinisher(holder, itemLabel) {
+    if (!holder) return null;
+    holder.finisherItem = { label: itemLabel || 'fire', element: 'fire' };
+    const clip = { key: 'local-fire-p' + (holder.pIndex || 0), videoUrl: LOCAL_FIRE_CLIP };
+    holder.finisherClip = clip;
+    holder.finisherCacheKey = clip.key;
+    holder.finisherReady = true;   // pre-baked local clip -> arm immediately so the green aura ALWAYS shows
+    const v = videoForClip(clip);  // start buffering (a ~1MB local file is ready well before it's used)
+    if (v && v.load) { try { v.load(); } catch (_e) { /* off-DOM load is best-effort */ } }
+    return clip;
   }
 
   function preloadForGame(game) {
@@ -338,6 +364,7 @@
     itemFinisherSpec,
     captureGameScreenshot,
     generateItemFinisher,
+    armLocalFinisher,
     findReadyItemClip,
   };
 })(window);

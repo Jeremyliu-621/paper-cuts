@@ -46,6 +46,13 @@ const FAL_RMBG_MODEL = 'fal-ai/bria/background/remove'; // saliency cutout (hand
 // Both are env-tunable so we can dial the look without code edits.
 const FAL_STYLE = process.env.FAL_STYLE || 'digital_illustration/hand_drawn';
 const FAL_STRENGTH = Number(process.env.FAL_STRENGTH || 0.72); // i2i: high enough to clean up + color, low enough to keep the kid's shape
+
+// Stage-1 generator provider. 'openai' = GPT-image-1 edit with a native TRANSPARENT background: it
+// redraws the kid's doodle into a clean game-asset sticker with real alpha, so NO cutout step is needed
+// (this is what finally kills the background/edge artifacts). 'fal' = legacy Recraft i2i + Bria below.
+const GEN_PROVIDER = (process.env.GEN_PROVIDER || 'fal').toLowerCase();
+const GPT_IMAGE_QUALITY = process.env.GPT_IMAGE_QUALITY || 'low'; // low|medium|high|auto ('low' ~22s, clean flat stickers; bump for complex drawings)
+const OPENAI_TIMEOUT_MS = Number(process.env.OPENAI_TIMEOUT_MS || 60000);
 // ---- VLM (open-vocab doodle recognition) ----
 const VLM_MODEL = process.env.MAGICBOARD_VLM_MODEL || 'gpt-4.1-mini';
 // the words the game can turn into mechanics — steer the VLM toward a USABLE label (js/mechanics.js).
@@ -93,10 +100,11 @@ function openaiKey() {
 // Recraft target prompt — the STYLE param carries the look, so the prompt just names the subject
 // and asks for a clean, single, game-ready sprite.
 function recraftPrompt(label) {
-  return `a clean, well-drawn hand-drawn doodle of a ${label} — confident tidy ink linework, ` +
-    `neat and crisp, simple flat colors, like a polished sketch by a skilled artist. ` +
-    `Single centered object, whole object fully visible with margin (not cropped), ` +
-    `plain solid white background, clean edges, no text, no background, no scenery.`;
+  return `a clean, well-drawn hand-drawn doodle of a ${label} — confident tidy ink outline with ` +
+    `SOLID even flat-color fills (every shape fully filled edge-to-edge, no gaps, no white holes, no ` +
+    `sketchy or scribbly shading), neat and crisp like a polished sticker. Single centered object, ` +
+    `whole object fully visible with margin (not cropped), plain solid white background, clean edges, ` +
+    `no text, no background, no scenery.`;
 }
 // Legacy SDXL prompt (FAL_PIPELINE=sdxl).
 function falPrompt(label) {
@@ -218,6 +226,60 @@ async function falEnhance(req, res) {
   }
 }
 
+// GPT-image-1 target prompt: redraw the doodle as a clean, flat, bold-outline game-asset sticker.
+function gptImagePrompt(label) {
+  return `Redraw this child's doodle as a clean game-asset sticker of a ${label}. Keep the same shapes ` +
+    `and proportions, but give it a bold confident black outline and solid flat colors (no shading, no ` +
+    `sketchiness), cute simple doodle aesthetic. Single centered object, fully transparent background.`;
+}
+
+// POST /fal-enhance (GEN_PROVIDER=openai): kid's drawing -> GPT-image-1 edit with a TRANSPARENT
+// background. Returns a clean game-asset sprite with native alpha — no server/client cutout needed.
+// Same { image_b64, label } -> { sprite_b64 } contract; adds transparent:true so the client skips isolation.
+async function gptImageEnhance(req, res) {
+  const key = openaiKey();
+  if (!key) return sendJson(res, 500, { error: 'OPENAI_API_KEY not configured (.env or backend/.env)' });
+
+  let body;
+  try { body = await readJsonBody(req); }
+  catch (e) { return sendJson(res, 400, { error: e.message || 'bad body' }); }
+
+  const image_b64 = body && body.image_b64;
+  if (typeof image_b64 !== 'string' || !image_b64) {
+    return sendJson(res, 400, { error: 'image_b64 (base64 PNG) is required' });
+  }
+  const label = (body && typeof body.label === 'string' && body.label.trim()) || 'object';
+  const buf = Buffer.from(image_b64.replace(/^data:[^,]*,/, ''), 'base64');
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OPENAI_TIMEOUT_MS);
+  try {
+    const fd = new FormData();
+    fd.append('model', 'gpt-image-1');
+    fd.append('image', new Blob([buf], { type: 'image/png' }), 'doodle.png');
+    fd.append('prompt', gptImagePrompt(label));
+    fd.append('size', '1024x1024');
+    fd.append('background', 'transparent');
+    fd.append('quality', GPT_IMAGE_QUALITY);
+    const r = await fetch('https://api.openai.com/v1/images/edits', {
+      method: 'POST', headers: { 'Authorization': `Bearer ${key}` }, body: fd, signal: ctrl.signal,
+    });
+    if (!r.ok) {
+      const detail = await r.text().catch(() => '');
+      return sendJson(res, 502, { error: `gpt-image failed (${r.status}) ${detail.slice(0, 300)}` });
+    }
+    const out = await r.json();
+    const b64 = out && out.data && out.data[0] && out.data[0].b64_json;
+    if (!b64) return sendJson(res, 502, { error: 'gpt-image returned no image' });
+    return sendJson(res, 200, { sprite_b64: b64, transparent: true });
+  } catch (e) {
+    if (e && e.name === 'AbortError') return sendJson(res, 504, { error: 'gpt-image timed out' });
+    return sendJson(res, 502, { error: `gpt-image enhance failed: ${(e && e.message) || e}` });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // POST /vlm-recognize { image_b64 } -> { top:{label,confidence}, results:[...], confident }.
 // Open-vocab doodle recognition via the OpenAI vision model — reads ANYTHING (a bare flame -> "fire"),
 // unlike the fixed 25-class CNN. Mirrors the CNN /recognize response shape (js/ai.js recognize()).
@@ -275,13 +337,14 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml',
   '.png': 'image/png', '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.webp': 'image/webp',
 };
 // only files we intend to serve (no path traversal, no node_modules/server source)
 const ALLOW = new Set(['/index.html', '/style.css', '/controller.html']);
 function safeStatic(reqPath) {
   if (reqPath === '/') reqPath = '/index.html';
-  if (reqPath.startsWith('/js/')) {
-    // serve any js/*.js (the game scripts), but block traversal
+  if (reqPath.startsWith('/js/') || reqPath.startsWith('/assets/')) {
+    // serve any js/*.js (the game scripts) and assets/* (baked clips, images), but block traversal
     const rel = reqPath.replace(/^\/+/, '');
     if (rel.includes('..')) return null;
     return path.join(ROOT, rel);
@@ -303,11 +366,11 @@ const requestHandler = async (req, res) => {
 
   // controller page (phones land here from the QR)
   if (p === '/c' || p === '/controller') {
-    return sendFile(res, path.join(ROOT, 'controller.html'));
+    return sendFile(res, path.join(ROOT, 'controller.html'), req);
   }
   // iPad draw pad (draw -> drag onto the mini-map -> drops into the live match)
   if (p === '/draw' || p === '/drawpad') {
-    return sendFile(res, path.join(ROOT, 'drawpad.html'));
+    return sendFile(res, path.join(ROOT, 'drawpad.html'), req);
   }
   // QR image for a join URL
   if (p === '/qr') {
@@ -321,7 +384,7 @@ const requestHandler = async (req, res) => {
   // fal.ai enhance proxy: rough scribble + label -> polished doodle sprite
   if (p === '/fal-enhance') {
     if (req.method !== 'POST') { res.writeHead(405); return res.end('method not allowed'); }
-    return falEnhance(req, res);
+    return (GEN_PROVIDER === 'openai' ? gptImageEnhance : falEnhance)(req, res);
   }
   // VLM open-vocab recognition: a drawing PNG -> a game label (replaces the 25-class CNN)
   if (p === '/vlm-recognize') {
@@ -333,18 +396,37 @@ const requestHandler = async (req, res) => {
 
   const file = safeStatic(p);
   if (!file) { res.writeHead(404); return res.end('not found'); }
-  sendFile(res, file);
+  sendFile(res, file, req);
 };
 
 const server = TLS_CERT && TLS_KEY
   ? https.createServer({ cert: fs.readFileSync(TLS_CERT), key: fs.readFileSync(TLS_KEY) }, requestHandler)
   : http.createServer(requestHandler);
 
-function sendFile(res, file) {
-  fs.readFile(file, (err, buf) => {
-    if (err) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
-    res.end(buf);
+function sendFile(res, file, req) {
+  fs.stat(file, (err, stat) => {
+    if (err || !stat.isFile()) { res.writeHead(404); return res.end('not found'); }
+    const type = MIME[path.extname(file)] || 'application/octet-stream';
+    // HTTP Range support: Safari REQUIRES a 206 Partial Content response to play <video>; without it
+    // video.play() rejects with "The operation is not supported." Stream the requested byte range.
+    const range = req && req.headers && req.headers.range;
+    const m = range && /bytes=(\d*)-(\d*)/.exec(range);
+    if (m) {
+      let start = m[1] === '' ? 0 : parseInt(m[1], 10);
+      let end = m[2] === '' ? stat.size - 1 : parseInt(m[2], 10);
+      if (!Number.isFinite(start) || start < 0) start = 0;
+      if (!Number.isFinite(end) || end >= stat.size) end = stat.size - 1;
+      if (start > end) { res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); return res.end(); }
+      res.writeHead(206, {
+        'Content-Type': type,
+        'Accept-Ranges': 'bytes',
+        'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+        'Content-Length': end - start + 1,
+      });
+      return fs.createReadStream(file, { start, end }).pipe(res);
+    }
+    res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': stat.size });
+    fs.createReadStream(file).pipe(res);
   });
 }
 

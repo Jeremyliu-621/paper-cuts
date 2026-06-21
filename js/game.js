@@ -374,7 +374,13 @@
       const finisher = this.finisher;
       if (!finisher || finisher.done) return;
       finisher.done = true;
-      try { if (finisher.video) finisher.video.pause(); } catch (_error) { /* ignore media cleanup errors */ }
+      try {
+        if (finisher.video) {
+          finisher.video.pause();
+          // un-fullscreen: park it off-screen so it's reusable but no longer covering the game
+          finisher.video.style.cssText = 'position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+        }
+      } catch (_error) { /* ignore media cleanup errors */ }
       this.finisher = null;
       this.state = 'playing';
       const v = finisher.victim;
@@ -408,24 +414,45 @@
       if (!fin || !fin.video) { this._completeFinisher(); return; }
       const video = fin.video;
       this.effects.shake(0.45);
-      try { video.pause(); video.currentTime = 0; } catch (_error) { /* stale media seek */ }
+      video.muted = true; video.defaultMuted = true;   // guarantee inline muted autoplay (Safari)
+      video.setAttribute('muted', ''); video.setAttribute('playsinline', '');
+      // Play the clip as a REAL fullscreen DOM <video> over the canvas. Safari won't decode an off-screen
+      // <video> for canvas drawImage (readyState stays 0 -> you get the static "Finisher KO" fallback),
+      // so we show + play the element itself instead of blitting frames into the canvas.
+      video.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;object-fit:contain;background:#1c1815;z-index:99999;pointer-events:none';
+      if (document.body && video.parentNode !== document.body) document.body.appendChild(video);
+      try { video.currentTime = 0; } catch (_error) { /* stale media seek */ }
       video.onended = () => this._completeFinisher();
-      video.onerror = () => this._completeFinisher();
-      const played = video.play();
-      if (played && played.catch) played.catch(() => this._completeFinisher());
+      video.onerror = () => { console.warn('[finisher] video error:', video.error && video.error.message, video.src); this._completeFinisher(); };
+      const tryPlay = (attempt) => {
+        const p = video.play();
+        if (p && p.then) {
+          p.then(() => console.log('[finisher] PLAYING', video.videoWidth + 'x' + video.videoHeight, 'readyState', video.readyState))
+           .catch((e) => {
+             console.warn('[finisher] play() rejected (attempt ' + attempt + '):', e && e.message);
+             if (attempt < 3) setTimeout(() => tryPlay(attempt + 1), 200);  // self-heal a transient block
+           });
+        }
+      };
+      tryPlay(1);
     }
 
     // armed holder pressed the finisher key while in range of an opponent -> start the item finisher
     _checkItemFinishers(input) {
-      if (this.demo || this.finisher || !input || !input.player) return;
+      if (this.demo || this.finisher) return;
+      // Fires on the HOST keyboard (P1 'T', P2 'M') read GLOBALLY — so it works even when the fighter is
+      // driven by a phone controller (which has no finisher button). A pad pressFinisher is also honored.
+      const KEYS = ['KeyT', 'KeyM'];
       for (let i = 0; i < this.fighters.length; i++) {
         const f = this.fighters[i];
         if (!f.finisherReady || f.finisherUsed || f.dead) continue;
-        const inp = input.player(i);
-        if (!inp || !inp.pressFinisher) continue;
+        const keyP = !!(DS.Input && DS.Input.pressed && DS.Input.pressed(KEYS[i]));
+        const padP = !!(input && input.player && input.player(i) && input.player(i).pressFinisher);
+        if (!keyP && !padP) continue;
         let victim = null, best = Infinity;
         for (const o of this.fighters) { if (o === f || o.dead) continue; const d = Math.hypot(o.x - f.x, o.y - f.y); if (d < best) { best = d; victim = o; } }
-        if (victim && best <= 130 && this.tryStartItemFinisher(f, victim, this.world)) { f.finisherUsed = true; break; }
+        console.log('[finisher] P' + (i + 1) + ' key (kbd=' + keyP + ' pad=' + padP + ') | nearest opp dist=' + Math.round(best) + ' (need <=220) | firing=' + (!!victim && best <= 220));
+        if (victim && best <= 220 && this.tryStartItemFinisher(f, victim, this.world)) { f.finisherUsed = true; break; }
       }
     }
 

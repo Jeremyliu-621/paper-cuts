@@ -21,6 +21,7 @@
     chloeEndpoint: null, // CHLOE /mechanic URL; null = default (instant) mechanic only
     recognizerEndpoint: null, // RECOGNIZER /recognize URL; null = caller supplies the label (no auto-naming)
     vlmEndpoint: null, // VLM /vlm-recognize URL; OPEN-VOCAB (reads anything). Preferred over the CNN.
+    paperTrailEndpoint: null, // PAPER TRAIL base URL (.../paper-trail); null = no RAR (CNN/VLM only as before)
     SIZE: 512,        // rasterized sketch size sent to /enhance (matches the compiled shape)
 
     // set the CAELLUM endpoint and ping its health
@@ -61,6 +62,17 @@
     connectVLM: function (url) {
       this.vlmEndpoint = url;
       console.log('[DS.AI] VLM recognizer connected:', url);
+      return url;
+    },
+
+    // set the PAPER TRAIL base endpoint (.../paper-trail). RAR (retrieval-augmented recognition):
+    // recognize() consults this FIRST (k-NN vote over every doodle ever drawn) and only falls to the
+    // CNN/VLM on a cold/low-confidence retrieval; every confirmed label is background-indexed back in.
+    // Strictly additive + best-effort — if it's null or unreachable, recognition is the old path exactly.
+    // Mirrors connectVLM (set + log; the backend lives with the game server, so no health ping).
+    connectPaperTrail: function (url) {
+      this.paperTrailEndpoint = url;
+      console.log('[DS.AI] Paper Trail (RAR) connected:', url);
       return url;
     },
 
@@ -159,18 +171,25 @@
         .then(function (out) {
           if (!out || !out.sprite_b64) throw new Error((out && out.error) || 'no sprite in response');
           if (prop.enhanced) { prop._enhancing = false; return; }   // CAELLUM polish already applied -> keep it
-          // the server returns the RAW generated image — isolate the drawn object (drop the plain
-          // background AND the stray decoration blobs the generator scatters around it), then swap in.
-          self._isolateDoodle(dataUrlFor(out.sprite_b64)).then(function (clean) {
-          if (prop.enhanced) return;
-          const sprite = new Image();
-          sprite.onload = function () {
+          const applySprite = function (srcUrl) {
             if (prop.enhanced) return;
-            prop.sprite = sprite; prop._falDone = true;
-            prop._enhancing = false; prop._revealT = 0;      // stop the FX, play the reveal pop
+            const sprite = new Image();
+            sprite.onload = function () {
+              if (prop.enhanced) return;
+              prop.sprite = sprite; prop._falDone = true;
+              prop._enhancing = false; prop._revealT = 0;    // stop the FX, play the reveal pop
+            };
+            sprite.src = srcUrl;
           };
-          sprite.src = clean;
-          });
+          if (out.transparent) {
+            // GPT-image returns a CLEAN, already-transparent sprite — there's no background to drop and
+            // isolating would risk mangling the native alpha. Use it directly.
+            applySprite(dataUrlFor(out.sprite_b64));
+          } else {
+            // legacy path: the server returns a generated image on a plain bg — isolate the drawn object
+            // (drop the bg AND the stray decoration blobs the generator scatters), then swap in.
+            self._isolateDoodle(dataUrlFor(out.sprite_b64)).then(applySprite);
+          }
         })
         .catch(function (e) {
           prop._enhancing = false;                           // stop the FX; the kid's drawing stays as-is
@@ -334,17 +353,75 @@
 
     // strokes -> what the AI thinks it is. Resolves to the recognizer response ({results,confident,top})
     // or null. The draw flow uses top.label instead of asking the kid to pick a category.
+    //
+    // RAR (Paper Trail): when paperTrailEndpoint is set we try RETRIEVAL-AUGMENTED RECOGNITION first —
+    // a k-NN vote over every doodle ever drawn (fast + free). A confident retrieval short-circuits the
+    // CNN/VLM entirely; otherwise we fall through to the EXISTING CNN->VLM chain unchanged. Whatever
+    // label is finally CONFIRMED is then background-indexed back into the memory. ALL Paper Trail work
+    // is best-effort + non-blocking: a failure/timeout NEVER breaks recognition. With paperTrailEndpoint
+    // null this is byte-for-byte the old CNN->VLM path.
     recognize: function (strokes) {
       const self = this;
-      // FAST PATH: the local CNN is instant (~0.1s). Use it when it's CONFIDENT; only fall to the
-      // slower cloud VLM (~5s) when the CNN is unsure or absent. Fast for the common 25 things,
-      // open-vocab for everything else. This is the ~5s latency win from the trained recognizer.
-      const cnn = this.recognizerEndpoint ? this._recognizeCnn(strokes) : Promise.resolve(null);
-      return cnn.then(function (r) {
-        if (r && r.confident && r.top && r.top.label) return r;             // confident local hit -> done
-        if (self.vlmEndpoint) return self._recognizeVlm(strokes).then(function (v) { return v || r; });
-        return r;                                                            // no VLM -> best CNN guess (or null)
+      const rar = this.paperTrailEndpoint ? this._recognizeRar(strokes) : Promise.resolve(null);
+      return rar.then(function (rr) {
+        if (rr && rr.confident && rr.top && rr.top.label) {                 // confident retrieval -> done (no CNN/VLM)
+          self._paperTrailIndex(strokes, rr.top.label);                    // background write-back, fire-and-forget
+          return rr;
+        }
+        // FAST PATH: the local CNN is instant (~0.1s). Use it when it's CONFIDENT; only fall to the
+        // slower cloud VLM (~5s) when the CNN is unsure or absent. Fast for the common 25 things,
+        // open-vocab for everything else. This is the ~5s latency win from the trained recognizer.
+        const cnn = self.recognizerEndpoint ? self._recognizeCnn(strokes) : Promise.resolve(null);
+        return cnn.then(function (r) {
+          if (r && r.confident && r.top && r.top.label) { self._paperTrailIndex(strokes, r.top.label); return r; } // confident local hit -> done
+          if (self.vlmEndpoint) return self._recognizeVlm(strokes).then(function (v) {
+            const out = v || r;
+            const lbl = out && out.top && out.top.label;
+            if (lbl) self._paperTrailIndex(strokes, lbl);                   // background write-back of the confirmed label
+            return out;
+          });
+          if (r && r.top && r.top.label) self._paperTrailIndex(strokes, r.top.label); // no VLM -> background-index the CNN guess
+          return r;                                                        // no VLM -> best CNN guess (or null)
+        });
       });
+    },
+
+    // RAR: rasterize -> POST {image_b64,k:8} to <paperTrailEndpoint>/recognize -> a k-NN vote over the
+    // community's doodle memory. The backend returns {ok,label,confidence,votes,neighbors}; we accept it
+    // only when confidence >= 0.6 AND votes >= 2 (spec §6) and adapt it to the recognizer's
+    // {results,confident,top} shape so the rest of the pipeline is unchanged. Best-effort: any
+    // failure/timeout (or a missing endpoint) resolves to null -> recognize() falls through to CNN/VLM.
+    _recognizeRar: function (strokes) {
+      if (!this.paperTrailEndpoint) return Promise.resolve(null);
+      let image_b64;
+      try { image_b64 = stripDataUrl(this._rasterizeUrl(strokes)); } catch (e) { return Promise.resolve(null); }
+      return fetch(this.paperTrailEndpoint + '/recognize', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ image_b64: image_b64, k: 8 }),
+      }).then(function (r) { return r.json(); })
+        .then(function (out) {
+          if (!out || out.ok === false || !out.label) return null;         // cold/empty/degraded retrieval
+          const conf = typeof out.confidence === 'number' ? out.confidence : 0;
+          const votes = typeof out.votes === 'number' ? out.votes : 0;
+          if (conf < 0.6 || votes < 2) return null;                        // not confident enough -> fall through
+          const top = { label: out.label, confidence: conf };
+          return { results: out.neighbors || [], confident: true, top: top, source: 'paper-trail' };
+        })
+        .catch(function () { return null; });                              // RAR down/slow -> degrade to CNN/VLM
+    },
+
+    // BEST-EFFORT background write-back: POST the confirmed label + rasterized PNG to
+    // <paperTrailEndpoint>/index so this drawing joins the shared memory (and improves future RAR).
+    // Never awaited, never blocks spawning; any failure is swallowed. No-op if Paper Trail is off.
+    _paperTrailIndex: function (strokes, label, mechanic) {
+      if (!this.paperTrailEndpoint || !label) return;
+      try {
+        const image_b64 = stripDataUrl(this._rasterizeUrl(strokes));
+        const body = { label: label, image_b64: image_b64 };
+        if (mechanic != null) body.mechanic = mechanic;
+        fetch(this.paperTrailEndpoint + '/index', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        }).catch(function () { /* best-effort memory write; never breaks recognition/spawn */ });
+      } catch (e) { /* rasterize/serialize blew up -> skip the write, recognition is unaffected */ }
     },
 
     // the trained 25-class CNN on :8600 — instant, local. Returns {results,confident,top} or null.

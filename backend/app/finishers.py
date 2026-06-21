@@ -153,7 +153,7 @@ async def _run_finisher_job(job_id: str) -> None:
         return
     try:
         await _refresh_finisher_job(job)
-        for _ in range(90):
+        for _ in range(180):  # Pika gen time is variable (~100-300s); poll up to 360s
             if job.status not in {"queued", "generating"}:
                 return
             await asyncio.sleep(2)
