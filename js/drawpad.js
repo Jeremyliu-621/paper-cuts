@@ -85,8 +85,8 @@
 
   function toggle() { if (!panel) build(); open = !open; panel.style.display = open ? 'block' : 'none'; }
 
+  // Drawing is gated to the iPad draw pad now (/draw over the relay). The old 'D' keyboard toggle is
+  // REMOVED — 'D' is a movement key, so binding it here broke keyboard play. DS.DrawPad.toggle() stays
+  // callable from the console for manual testing, but nothing auto-binds a key.
   DS.DrawPad = { toggle: toggle };
-  global.addEventListener('keydown', function (e) {
-    if (e.code === 'KeyD' && !e.repeat && !(e.target && /INPUT|TEXTAREA/.test(e.target.tagName))) toggle();
-  });
 })(window);

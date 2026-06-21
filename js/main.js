@@ -545,8 +545,12 @@
   function renderLobbyTop() {
     lobbyQR.innerHTML = ''; lobbyPlayers.innerHTML = '';
     if (DS.Net.available() && DS.Net.connected) {
-      const img = document.createElement('img'); img.src = '/qr?d=' + encodeURIComponent(DS.Net.joinURL()); img.alt = 'scan to join';
-      lobbyQR.appendChild(img); lobbyQR.appendChild(mkEl('div', 'lobby-cap', 'Scan to join')); lobbyQR.appendChild(mkEl('div', 'lobby-code', DS.Net.code));
+      const img = document.createElement('img'); img.src = '/qr?d=' + encodeURIComponent(DS.Net.joinURL()); img.alt = 'scan to play';
+      lobbyQR.appendChild(img); lobbyQR.appendChild(mkEl('div', 'lobby-cap', '🎮 Play (phone)'));
+      // iPad draw pad: a second QR -> /draw?lobby=CODE (draw -> drag onto the mini-map -> live spawn)
+      const dimg = document.createElement('img'); dimg.src = '/qr?d=' + encodeURIComponent(location.origin + '/draw?lobby=' + DS.Net.code); dimg.alt = 'scan to draw';
+      lobbyQR.appendChild(dimg); lobbyQR.appendChild(mkEl('div', 'lobby-cap', '✏️ Draw (iPad)'));
+      lobbyQR.appendChild(mkEl('div', 'lobby-code', DS.Net.code));
       for (let s = 1; s <= DS.Net.MAX; s++) { const pl = DS.Net.players[s]; const chip = mkEl('div', 'lobby-slot' + (pl ? ' on' : '')); chip.appendChild(mkEl('span', 'slot-tag', 'P' + s)); chip.appendChild(mkEl('span', 'slot-name', pl ? pl.name : 'open')); lobbyPlayers.appendChild(chip); }
     } else {
       lobbyQR.appendChild(mkEl('div', 'lobby-note', 'Keyboard play — P1 & P2 share one keyboard. (Run node server.js for phone players.)'));
@@ -881,6 +885,15 @@
   // expose for debugging and optional creation overlay bridge
   DS.game = game; DS.editor = editor;
   if (DS.CreateOverlay) DS.CreateOverlay.init();
+
+  // DEMO MODE (open the game at .../#demo): force-hide the teammate's level-build / library overlays
+  // so a demo goes straight to Play + the iPad draw pad. Non-destructive — only active with the flag.
+  if (location.hash.indexOf('#demo') === 0 || /[?&]demo\b/.test(location.search)) {
+    const st = document.createElement('style');
+    st.textContent = '#level-preview-ui,#library-overlay{display:none !important;}';
+    document.head.appendChild(st);
+    document.body.classList.add('demo-mode');
+  }
 
   // dev self-test: instant projectile + standing-jab vs dash-jab knockback (movement = power)
   if (location.hash === '#combattest') {
