@@ -54,7 +54,11 @@ def main() -> None:
     args = parse_args()
     print(f"[args] {vars(args)}")
     cuda = torch.cuda.is_available()
-    print(f"[env] cuda={cuda} device={'cuda' if cuda else 'cpu'}")
+    # T4 (Turing) has no real bf16 -> use fp16 there; A100/L4 (Ampere/Ada) -> bf16; CPU -> fp32.
+    bf16 = cuda and torch.cuda.is_bf16_supported()
+    fp16 = cuda and not bf16
+    dtype = torch.bfloat16 if bf16 else (torch.float16 if fp16 else torch.float32)
+    print(f"[env] cuda={cuda} bf16={bf16} fp16={fp16}")
 
     # --- tokenizer (drives the chat template) ---
     tok = AutoTokenizer.from_pretrained(args.model)
@@ -72,8 +76,7 @@ def main() -> None:
     ds = ds.map(tokenize, remove_columns=ds.column_names, desc="tokenizing")
 
     # --- base model + LoRA ---
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model, torch_dtype=torch.bfloat16 if cuda else torch.float32)
+    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype)
     model.config.use_cache = False
     lora = LoraConfig(
         r=args.lora_r, lora_alpha=args.lora_alpha, lora_dropout=args.lora_dropout,
@@ -96,7 +99,7 @@ def main() -> None:
         warmup_ratio=0.03,
         logging_steps=args.logging_steps,
         save_strategy="no",            # one explicit save at the end -> output_dir
-        bf16=cuda, fp16=False,
+        bf16=bf16, fp16=fp16,
         seed=args.seed,
         report_to="none",
     )
