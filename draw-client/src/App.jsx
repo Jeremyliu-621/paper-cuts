@@ -85,6 +85,14 @@ function clarificationUrlForRoom(backendUrl, roomId) {
   return url.toString()
 }
 
+function visualObservationUrlForRoom(backendUrl, roomId) {
+  const url = new URL(backendUrl)
+  url.pathname = `/rooms/${encodeURIComponent(roomId)}/visual-observation`
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
 function selectionWsUrlForBackend(backendUrl) {
   const url = new URL(backendUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -92,6 +100,17 @@ function selectionWsUrlForBackend(backendUrl) {
   url.search = ''
   url.hash = ''
   return url.toString()
+}
+
+function roomSelectionFromUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const roomId = params.get('room')
+  if (!roomId) return null
+  return {
+    roomId,
+    worldId: params.get('world') || roomId,
+    worldName: params.get('worldName') || null,
+  }
 }
 
 function createClientId() {
@@ -212,18 +231,28 @@ function semanticCandidateCount(semanticDraft) {
   return semanticDraft?.candidates?.length || 0
 }
 
-function choiceForCommand(command) {
-  const value = command.trim().toLowerCase()
-  if (!value) return null
-  if (/\b(no|ignore|skip|remove)\b/.test(value)) return 'no_ignore'
-  if (/\b(decor|decoration|background)\b/.test(value)) return 'decor'
-  if (/\b(pass|through|one[-\s]?way|soft)\b/.test(value)) return 'pass_through'
-  if (/\b(bounce|bouncy|trampoline|spring)\b/.test(value)) return 'bouncy'
-  if (/\b(spike|spikes|damage|damaging|hurt|hazard)\b/.test(value)) return 'damaging'
-  if (/\b(icy|ice|crystal|slippery)\b/.test(value)) return 'icy'
-  if (/\b(break|breakable|box|crate)\b/.test(value)) return 'breakable'
-  if (/\b(yes|platform|solid|normal)\b/.test(value)) return 'normal'
-  return null
+function visualObservationLabel(observation) {
+  if (!observation) return 'waiting'
+  if (observation.status === 'pending') return 'observing'
+  if (observation.status === 'ready') return observation.latencyMs ? `ready · ${observation.latencyMs}ms` : 'ready'
+  if (observation.status === 'missing_key') return 'missing key'
+  if (observation.status === 'stale') return 'stale'
+  return 'error'
+}
+
+function choiceLabel(choice) {
+  const labels = {
+    yes_platform: 'Solid',
+    normal: 'Solid',
+    pass_through: 'Pass-through',
+    bouncy: 'Bouncy',
+    damaging: 'Damaging',
+    icy: 'Icy',
+    breakable: 'Breakable',
+    decor: 'Decoration',
+    no_ignore: 'Ignore',
+  }
+  return labels[choice?.id] || choice?.label || 'Choose'
 }
 
 function ensureStageFrame(editor) {
@@ -368,20 +397,19 @@ function SemanticPanel({
   selectedCandidateId,
   onSelectCandidate,
   onAnswer,
-  command,
-  onCommandChange,
-  onCommandSubmit,
   error,
 }) {
   const candidates = semanticDraft?.candidates || []
   const pending = candidates.filter((candidate) => candidate.status === 'needs_answer')
-  const selected = candidates.find((candidate) => candidate.candidateId === selectedCandidateId) || pending[0] || candidates[0]
+  const current = candidates.find((candidate) => candidate.candidateId === selectedCandidateId)
+  const selected = current?.status === 'needs_answer' ? current : pending[0] || current || candidates[0]
   if (!candidates.length) return null
   const question = selected?.question
   const choices = question?.choices || []
+  const pendingCount = pending.length
 
   return (
-    <section className="semantic-panel" aria-label="Semantic clarification">
+    <section className="semantic-panel" aria-label="Agent asks">
       <div className="semantic-candidate-strip">
         {candidates.map((candidate, index) => (
           <button
@@ -397,7 +425,10 @@ function SemanticPanel({
       {selected ? (
         <div className="semantic-question">
           <div className="semantic-question-head">
-            <strong>{selected.status === 'needs_answer' ? question?.prompt || 'Is this a platform?' : selected.answer?.choiceId || selected.status}</strong>
+            <div>
+              <span>{pendingCount ? `Agent asks · ${pendingCount} left` : 'Agent state'}</span>
+              <strong>{selected.status === 'needs_answer' ? question?.prompt || 'What should this platform do?' : selected.answer?.choiceId || selected.status}</strong>
+            </div>
             <span>{selected.extractor}</span>
           </div>
           {selected.status === 'needs_answer' ? (
@@ -408,7 +439,7 @@ function SemanticPanel({
                   type="button"
                   onClick={() => onAnswer(selected, choice.id)}
                 >
-                  {choice.label}
+                  {choiceLabel(choice)}
                 </button>
               ))}
             </div>
@@ -417,17 +448,31 @@ function SemanticPanel({
               {selected.answer?.role === 'platform' ? `Confirmed: ${selected.answer.behavior}` : selected.status}
             </p>
           )}
-          <form className="semantic-command" onSubmit={onCommandSubmit}>
-            <input
-              value={command}
-              onChange={(event) => onCommandChange(event.target.value)}
-              placeholder="type: pass-through, bouncy, spikes, decor, ignore"
-              aria-label="Clarification command"
-            />
-            <button type="submit">Send</button>
-          </form>
           {error ? <p className="semantic-error">{error}</p> : null}
         </div>
+      ) : null}
+    </section>
+  )
+}
+
+function VisualObservationPanel({ observation }) {
+  if (!observation) return null
+  const hints = observation.hints || []
+  return (
+    <section className={`visual-observation-panel observation-${observation.status}`} aria-label="Visual observation">
+      <div className="visual-observation-head">
+        <strong>Vision</strong>
+        <span>{visualObservationLabel(observation)}</span>
+      </div>
+      <p>{observation.description || 'Waiting for visual observation.'}</p>
+      {hints.length ? (
+        <ul>
+          {hints.slice(0, 3).map((hint, index) => (
+            <li key={`${hint.description}-${index}`}>
+              {hint.kind} · {Math.round((hint.confidence || 0) * 100)}%
+            </li>
+          ))}
+        </ul>
       ) : null}
     </section>
   )
@@ -438,7 +483,8 @@ export default function App() {
     () => normalizeBackendUrl(getBackendUrl()),
     [],
   )
-  const [selectedRoom, setSelectedRoom] = useState(null)
+  const explicitRoom = useMemo(() => roomSelectionFromUrl(), [])
+  const [selectedRoom, setSelectedRoom] = useState(explicitRoom)
   const roomId = selectedRoom?.roomId || ''
   const selectionWsUrl = useMemo(
     () => selectionWsUrlForBackend(backendUrl),
@@ -448,6 +494,7 @@ export default function App() {
     () => (roomId ? {
       capture: captureUrlForRoom(backendUrl, roomId),
       clarifications: clarificationUrlForRoom(backendUrl, roomId),
+      visualObservation: visualObservationUrlForRoom(backendUrl, roomId),
       websocket: websocketUrlForRoom(backendUrl, roomId),
     } : null),
     [backendUrl, roomId],
@@ -472,11 +519,11 @@ export default function App() {
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
   const [projectionCount, setProjectionCount] = useState(0)
   const [semanticDraft, setSemanticDraft] = useState(null)
+  const [visualObservation, setVisualObservation] = useState(null)
   const [selectedCandidateId, setSelectedCandidateId] = useState(null)
-  const [semanticCommand, setSemanticCommand] = useState('')
   const [semanticError, setSemanticError] = useState('')
   const [error, setError] = useState('')
-  const [selectionStatus, setSelectionStatus] = useState('waiting')
+  const [selectionStatus, setSelectionStatus] = useState(explicitRoom ? 'url room' : 'waiting')
   const tldrawComponents = useMemo(
     () => ({
       OnTheCanvas: () => (
@@ -492,9 +539,11 @@ export default function App() {
   useEffect(() => {
     const candidates = semanticDraft?.candidates || []
     setSelectedCandidateId((current) => {
-      if (current && candidates.some((candidate) => candidate.candidateId === current)) return current
+      const selected = candidates.find((candidate) => candidate.candidateId === current)
+      if (selected?.status === 'needs_answer') return current
       const pending = candidates.find((candidate) => candidate.status === 'needs_answer')
-      return pending?.candidateId || candidates[0]?.candidateId || null
+      if (pending) return pending.candidateId
+      return selected?.candidateId || candidates[0]?.candidateId || null
     })
   }, [semanticDraft])
 
@@ -505,6 +554,12 @@ export default function App() {
 
     const applySelection = (selection, source) => {
       if (cancelled) return
+      if (explicitRoom) {
+        setSelectionStatus(source ? `url room · ${source}` : 'url room')
+        setError('')
+        setSelectedRoom(explicitRoom)
+        return
+      }
       if (selection.roomId) {
         setSelectionStatus(source || 'ready')
         setError('')
@@ -577,7 +632,7 @@ export default function App() {
       window.clearTimeout(reconnectTimer)
       socket?.close()
     }
-  }, [selectionWsUrl])
+  }, [explicitRoom, selectionWsUrl])
 
   useEffect(() => {
     setStatus(roomId ? 'idle' : 'waiting')
@@ -586,12 +641,31 @@ export default function App() {
     setLastSyncedAt(null)
     setProjectionCount(0)
     setSemanticDraft(null)
+    setVisualObservation(null)
     setSelectedCandidateId(null)
-    setSemanticCommand('')
     setSemanticError('')
     localHadUserContentRef.current = false
     userInteractedRef.current = false
   }, [roomId])
+
+  const activePendingCandidate = useMemo(() => {
+    const candidates = semanticDraft?.candidates || []
+    return candidates.find((candidate) => candidate.candidateId === selectedCandidateId && candidate.status === 'needs_answer')
+      || candidates.find((candidate) => candidate.status === 'needs_answer')
+      || null
+  }, [semanticDraft, selectedCandidateId])
+
+  useEffect(() => {
+    if (!activePendingCandidate?.question?.prompt || !window.speechSynthesis) return
+    const utterance = new SpeechSynthesisUtterance(activePendingCandidate.question.prompt)
+    utterance.rate = 0.96
+    utterance.pitch = 1
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(utterance)
+    return () => {
+      window.speechSynthesis?.cancel()
+    }
+  }, [activePendingCandidate?.questionId])
 
   const sendCaptureNow = useCallback(() => {
     const editor = editorRef.current
@@ -659,24 +733,6 @@ export default function App() {
     }
   }, [roomId, selectedRoom?.worldId, urls])
 
-  const submitSemanticCommand = useCallback((event) => {
-    event.preventDefault()
-    const choiceId = choiceForCommand(semanticCommand)
-    const candidates = semanticDraft?.candidates || []
-    const selected = candidates.find((candidate) => candidate.candidateId === selectedCandidateId)
-      || candidates.find((candidate) => candidate.status === 'needs_answer')
-    if (!choiceId) {
-      setSemanticError('Use a supported command.')
-      return
-    }
-    if (!selected || selected.status !== 'needs_answer') {
-      setSemanticError('No pending object selected.')
-      return
-    }
-    setSemanticCommand('')
-    sendClarificationAnswer(selected, choiceId)
-  }, [semanticCommand, semanticDraft, selectedCandidateId, sendClarificationAnswer])
-
   const scheduleCaptureSend = useCallback(() => {
     if (loadingCaptureRef.current) return
     if (!userInteractedRef.current) return
@@ -714,15 +770,21 @@ export default function App() {
         setBackendVersion(message.backendVersion || 'unknown')
         setRoomVersion(message.version ?? 0)
         setSemanticDraft(message.semanticDraft || null)
+        setVisualObservation(message.visualObservation || null)
       } else if (message.type === 'projection_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
         setLastSyncedAt(message.updatedAt || new Date().toISOString())
         setSemanticDraft(message.semanticDraft || null)
+        setVisualObservation(message.visualObservation || null)
       } else if (message.type === 'semantic_draft_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
         setSemanticDraft(message.semanticDraft || null)
+      } else if (message.type === 'visual_observation_updated') {
+        setStatus('connected')
+        setRoomVersion(message.version ?? 0)
+        setVisualObservation(message.visualObservation || null)
       } else if (message.type === 'error') {
         setError(message.message || 'Backend rejected a message.')
         setSemanticError(message.message || 'Backend rejected a message.')
@@ -762,6 +824,7 @@ export default function App() {
           if (!mountedRef.current || mountIdRef.current !== mountId) return
           setRoomVersion(room.version ?? 0)
           setSemanticDraft(room.semanticDraft || null)
+          setVisualObservation(room.visualObservation || null)
           localHadUserContentRef.current = projectionObjectCount(room.projection) > 0
 
           if (room.capture) {
@@ -837,11 +900,9 @@ export default function App() {
         selectedCandidateId={selectedCandidateId}
         onSelectCandidate={setSelectedCandidateId}
         onAnswer={sendClarificationAnswer}
-        command={semanticCommand}
-        onCommandChange={setSemanticCommand}
-        onCommandSubmit={submitSemanticCommand}
         error={semanticError}
       />
+      <VisualObservationPanel observation={visualObservation} />
       <section className="debug-panel" aria-label="Sync status">
         <div className={`status-dot status-${status}`} />
         <dl>
@@ -876,6 +937,10 @@ export default function App() {
           <div>
             <dt>Draft</dt>
             <dd>{semanticCandidateCount(semanticDraft)}</dd>
+          </div>
+          <div>
+            <dt>Vision</dt>
+            <dd>{visualObservationLabel(visualObservation)}</dd>
           </div>
           <div>
             <dt>Synced</dt>

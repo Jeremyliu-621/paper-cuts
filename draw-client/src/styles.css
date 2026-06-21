@@ -202,12 +202,12 @@ body {
 .semantic-panel {
   position: fixed;
   left: max(12px, env(safe-area-inset-left));
-  bottom: max(12px, env(safe-area-inset-bottom));
+  top: max(154px, calc(env(safe-area-inset-top) + 154px));
   z-index: 24;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
-  width: min(760px, calc(100vw - 24px));
+  width: min(620px, calc(100vw - 24px));
   padding: 10px;
   border: 1px solid rgba(31, 37, 40, 0.18);
   border-radius: 8px;
@@ -225,8 +225,7 @@ body {
 }
 
 .semantic-candidate-pill,
-.semantic-choice-grid button,
-.semantic-command button {
+.semantic-choice-grid button {
   border: 1px solid rgba(47, 42, 38, 0.28);
   border-radius: 7px;
   background: #fffaf0;
@@ -259,10 +258,16 @@ body {
 
 .semantic-question-head {
   display: flex;
-  align-items: baseline;
+  align-items: start;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
+}
+
+.semantic-question-head div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
 }
 
 .semantic-question-head strong {
@@ -283,8 +288,7 @@ body {
   gap: 6px;
 }
 
-.semantic-choice-grid button,
-.semantic-command button {
+.semantic-choice-grid button {
   min-height: 34px;
   padding: 6px 8px;
   font-size: 12px;
@@ -292,29 +296,9 @@ body {
 }
 
 .semantic-choice-grid button:hover,
-.semantic-command button:hover,
 .semantic-candidate-pill:hover {
   border-color: #2f2a26;
   background: #f7f4ec;
-}
-
-.semantic-command {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.semantic-command input {
-  min-width: 0;
-  height: 34px;
-  padding: 6px 8px;
-  border: 1px solid rgba(47, 42, 38, 0.22);
-  border-radius: 7px;
-  background: #fffdf7;
-  color: #1f2528;
-  font: inherit;
-  font-size: 13px;
 }
 
 .semantic-answer-state,
@@ -333,10 +317,78 @@ body {
   color: #a33a2a;
 }
 
+.visual-observation-panel {
+  position: fixed;
+  left: max(12px, env(safe-area-inset-left));
+  top: max(12px, env(safe-area-inset-top));
+  z-index: 22;
+  width: min(360px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border: 1px solid rgba(31, 37, 40, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 252, 244, 0.9);
+  box-shadow: 0 8px 24px rgba(31, 37, 40, 0.12);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+}
+
+.visual-observation-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.visual-observation-head strong {
+  font-size: 13px;
+}
+
+.visual-observation-head span {
+  color: rgba(31, 37, 40, 0.62);
+  font-size: 11px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.visual-observation-panel p,
+.visual-observation-panel ul {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.visual-observation-panel p {
+  color: rgba(31, 37, 40, 0.76);
+}
+
+.visual-observation-panel ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 7px 0 0;
+  list-style: none;
+}
+
+.visual-observation-panel li {
+  padding: 3px 6px;
+  border: 1px solid rgba(47, 42, 38, 0.18);
+  border-radius: 999px;
+  background: rgba(247, 244, 236, 0.84);
+  color: #1f2528;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.observation-error .visual-observation-head span,
+.observation-missing_key .visual-observation-head span {
+  color: #a33a2a;
+}
+
 .debug-panel {
   position: fixed;
   right: max(12px, env(safe-area-inset-right));
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: max(92px, calc(env(safe-area-inset-bottom) + 92px));
   z-index: 20;
   display: grid;
   grid-template-columns: auto 1fr;
@@ -415,7 +467,10 @@ body {
 @media (max-width: 720px) {
   .semantic-panel {
     grid-template-columns: 1fr;
+    top: max(142px, calc(env(safe-area-inset-top) + 142px));
+    left: max(12px, env(safe-area-inset-left));
     right: max(12px, env(safe-area-inset-right));
+    width: auto;
   }
 
   .semantic-candidate-strip {
@@ -427,6 +482,7 @@ body {
   .semantic-choice-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
 }
 
 .tl-container {

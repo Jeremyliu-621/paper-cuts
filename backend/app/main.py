@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -7,7 +8,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
-from .agent_runtime import agent_status
+from .agent_runtime import agent_status, run_visual_observation
 from .rooms import rooms
 from .schemas import (
     AgentJobRequest,
@@ -45,10 +46,40 @@ async def get_room_capture(room_id: str) -> dict[str, Any]:
     return rooms.capture_response(room_id).model_dump(mode="json", by_alias=True)
 
 
+async def _run_visual_job(room_id: str, capture_version: int, job_id: str, world_id: str | None, projection: dict[str, Any]) -> None:
+    observation = await run_visual_observation(
+        room_id=room_id,
+        world_id=world_id,
+        capture_version=capture_version,
+        job_id=job_id,
+        projection=projection,
+    )
+    update = rooms.store_visual_observation(room_id, observation)
+    if update is not None:
+        await rooms.broadcast_visual(room_id, update)
+
+
+def _schedule_visual_observation(room_id: str) -> None:
+    room = rooms.get_room(room_id)
+    observation = room.visual_observation
+    if not observation or observation.status != "pending" or not room.projection:
+        return
+    asyncio.create_task(
+        _run_visual_job(
+            room_id=room.room_id,
+            capture_version=observation.capture_version,
+            job_id=observation.job_id,
+            world_id=room.world_id,
+            projection=room.projection,
+        )
+    )
+
+
 @app.post("/rooms/{room_id}/capture")
 async def save_room_capture(room_id: str, capture: CanvasCaptureMessage) -> dict[str, Any]:
     update = rooms.store_capture(room_id, capture)
     await rooms.broadcast(room_id, update)
+    _schedule_visual_observation(room_id)
     return rooms.capture_response(room_id).model_dump(mode="json", by_alias=True)
 
 
@@ -56,6 +87,12 @@ async def save_room_capture(room_id: str, capture: CanvasCaptureMessage) -> dict
 async def get_semantic_draft(room_id: str) -> dict[str, Any] | None:
     draft = rooms.semantic_draft(room_id)
     return None if draft is None else draft.model_dump(mode="json", by_alias=True)
+
+
+@app.get("/rooms/{room_id}/visual-observation")
+async def get_visual_observation(room_id: str) -> dict[str, Any] | None:
+    observation = rooms.visual_observation(room_id)
+    return None if observation is None else observation.model_dump(mode="json", by_alias=True)
 
 
 @app.post("/rooms/{room_id}/clarifications")
@@ -137,6 +174,7 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
             version=room.version,
             projection=room.projection,
             semanticDraft=room.semantic_draft,
+            visualObservation=room.visual_observation,
         ).model_dump(mode="json", by_alias=True)
     )
 
@@ -170,6 +208,7 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
 
                 update = rooms.store_capture(room_id, message)
                 await rooms.broadcast(room_id, update)
+                _schedule_visual_observation(room_id)
             else:
                 try:
                     answer = ClarificationAnswerMessage.model_validate(data)

@@ -120,6 +120,7 @@
         worldId: activeWorld.id,
         roomId: activeWorld.roomId || activeWorld.id,
         mapId,
+        replacePlatforms: true,
       });
       if (!patch.operations.length) throw new Error('Confirm at least one platform first.');
       const result = DS.MagicBoardGame.applyPatch(patch, {

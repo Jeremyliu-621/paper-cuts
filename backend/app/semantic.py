@@ -126,13 +126,24 @@ def _rectangle_geometry(shape: dict[str, Any]) -> SemanticGeometry | None:
 
 
 def _stroke_geometry(stroke: dict[str, Any]) -> SemanticGeometry | None:
-    bounds = _bounds_from_points(stroke.get("points") or [])
+    points = stroke.get("points") or []
+    bounds = _bounds_from_points(points)
     if not bounds:
         return None
     width = _num(stroke.get("width")) or 6.0
-    if width < 8:
-        return None
     horizontal_drift = abs(bounds["end_y"] - bounds["start_y"])
+    if width < 8:
+        # Thin freehand platform outlines often produce tall scribbly bounds.
+        # Accept them when their start/end line stays level and the overall mark
+        # is still wider than it is tall enough to be playable.
+        if len(points) < 6:
+            return None
+        if bounds["w"] < MIN_PLATFORM_W or bounds["w"] < bounds["h"] * 1.2:
+            return None
+        if horizontal_drift > max(38.0, bounds["w"] * 0.16):
+            return None
+        h = max(MIN_PLATFORM_H, min(MAX_PLATFORM_H, bounds["h"]))
+        return SemanticGeometry(x=_round(bounds["x"]), y=_round(bounds["y"]), w=_round(bounds["w"]), h=_round(h))
     visual_h = max(width * 2.4, bounds["h"] + width * 1.8, MIN_PLATFORM_H)
     if bounds["w"] < MIN_PLATFORM_W:
         return None
@@ -163,7 +174,7 @@ def _make_candidate(
     question = SemanticQuestion(
         questionId=question_id,
         candidateId=candidate_id,
-        prompt="Is this a platform?",
+        prompt="What should this platform do?",
         choices=CHOICES,
         roomId=room_id,
         worldId=world_id,

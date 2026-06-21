@@ -111,6 +111,34 @@ class SemanticDraft(BaseModel):
     stale_answers: list[SemanticAnswer] = Field(default_factory=list, alias="staleAnswers")
 
 
+class VisualObservationHint(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    kind: Literal["platform", "hazard", "decor", "unknown"]
+    confidence: float
+    description: str
+    behavior: Literal["solid", "pass", "bounce", "hurt", "ice", "breakable", "decor", "ignore"] | None = None
+    source_ids: list[str] = Field(default_factory=list, alias="sourceIds")
+    geometry: SemanticGeometry | None = None
+
+
+class VisualObservation(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["magicboard_visual_observation"] = "magicboard_visual_observation"
+    status: Literal["pending", "ready", "missing_key", "error", "stale"]
+    room_id: str = Field(alias="roomId")
+    world_id: str | None = Field(default=None, alias="worldId")
+    capture_version: int = Field(alias="captureVersion")
+    job_id: str = Field(alias="jobId")
+    model: str | None = None
+    description: str = ""
+    hints: list[VisualObservationHint] = Field(default_factory=list)
+    latency_ms: int | None = Field(default=None, alias="latencyMs")
+    errors: list[str] = Field(default_factory=list)
+    updated_at: datetime = Field(alias="updatedAt")
+
+
 class RoomCaptureResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -119,6 +147,7 @@ class RoomCaptureResponse(BaseModel):
     capture: dict[str, Any] | None
     projection: dict[str, Any] | None
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
+    visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
     updated_at: datetime | None = Field(alias="updatedAt")
     recent_events: list[RecentEvent] = Field(alias="recentEvents")
 
@@ -184,6 +213,7 @@ class HelloMessage(BaseModel):
     backend_version: str = Field(default=BACKEND_VERSION, alias="backendVersion")
     projection: dict[str, Any] | None = None
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
+    visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
 
 
 class ProjectionUpdatedMessage(BaseModel):
@@ -195,6 +225,7 @@ class ProjectionUpdatedMessage(BaseModel):
     updated_at: datetime = Field(alias="updatedAt")
     projection: dict[str, Any]
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
+    visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
     source_client_id: str | None = Field(default=None, alias="sourceClientId")
 
 
@@ -211,6 +242,15 @@ class SemanticDraftUpdatedMessage(BaseModel):
     version: int
     semantic_draft: SemanticDraft = Field(alias="semanticDraft")
     source_client_id: str | None = Field(default=None, alias="sourceClientId")
+
+
+class VisualObservationUpdatedMessage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["visual_observation_updated"] = "visual_observation_updated"
+    room_id: str = Field(alias="roomId")
+    version: int
+    visual_observation: VisualObservation = Field(alias="visualObservation")
 
 
 class AgentCapabilityStatus(BaseModel):

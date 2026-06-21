@@ -15,3 +15,5 @@ backend/**/__pycache__/
 draw-client/node_modules/
 draw-client/dist/
 draw-client/.npm-cache/
+
+.env

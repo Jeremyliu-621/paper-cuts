@@ -5,7 +5,9 @@ description = "FastAPI backend for Magic Board iPad drawing snapshot persistence
 readme = "../README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "certifi>=2025.11.12",
     "fastapi>=0.115.0",
+    "pillow>=12.2.0",
     "pydantic>=2.8.0",
     "uvicorn[standard]>=0.30.0",
 ]

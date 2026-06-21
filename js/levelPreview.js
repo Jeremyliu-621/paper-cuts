@@ -19,6 +19,7 @@
     version: 0,
     projection: null,
     semanticDraft: null,
+    visualObservation: null,
     socket: null,
     reconnectTimer: 0,
     activityTimer: 0,
@@ -125,10 +126,11 @@
     syncUi();
   }
 
-  function updateProjection(version, projection, semanticDraft, updatedAt) {
+  function updateProjection(version, projection, semanticDraft, visualObservation, updatedAt) {
     state.version = version || state.version || 0;
     state.projection = projection || null;
     state.semanticDraft = semanticDraft || null;
+    state.visualObservation = visualObservation || state.visualObservation || null;
     syncUi();
     if (state.onActivity && (projection || updatedAt)) {
       clearTimeout(state.activityTimer);
@@ -152,7 +154,8 @@
       const draft = state.semanticDraft || {};
       const total = (draft.candidates || []).length || ((projection.strokes || []).length + (projection.shapes || []).length);
       const confirmed = (draft.candidates || []).filter((candidate) => candidate.status === 'confirmed').length;
-      count.textContent = total ? confirmed + '/' + total + ' confirmed' : 'Draw platforms on the iPad';
+      if (confirmed) count.textContent = confirmed + ' platform' + (confirmed === 1 ? '' : 's') + ' ready to apply';
+      else count.textContent = total ? confirmed + '/' + total + ' confirmed' : 'Draw platforms on the iPad';
     }
   }
 
@@ -164,7 +167,7 @@
       if (!response.ok) throw new Error('capture ' + response.status);
       const room = await response.json();
       if (seq !== state.enterSeq) return;
-      updateProjection(room.version || 0, room.projection || state.projection, room.semanticDraft || state.semanticDraft, room.updatedAt);
+      updateProjection(room.version || 0, room.projection || state.projection, room.semanticDraft || state.semanticDraft, room.visualObservation || state.visualObservation, room.updatedAt);
       setStatus('loaded');
     } catch (error) {
       if (seq !== state.enterSeq) return;
@@ -181,7 +184,7 @@
     if (!response.ok) throw new Error('Capture save failed: ' + response.status);
     const room = await response.json();
     if (seq !== state.enterSeq || roomId !== state.roomId) throw new Error('Level changed before save completed.');
-    updateProjection(room.version || 0, room.projection || null, room.semanticDraft || null, room.updatedAt);
+    updateProjection(room.version || 0, room.projection || null, room.semanticDraft || null, room.visualObservation || null, room.updatedAt);
     return room;
   }
 
@@ -204,13 +207,17 @@
       catch (_error) { return; }
       if (message.type === 'hello') {
         setStatus('connected');
-        updateProjection(message.version || 0, message.projection || state.projection, message.semanticDraft || state.semanticDraft, null);
+        updateProjection(message.version || 0, message.projection || state.projection, message.semanticDraft || state.semanticDraft, message.visualObservation || state.visualObservation, null);
       } else if (message.type === 'projection_updated') {
         setStatus('connected');
-        updateProjection(message.version || state.version, message.projection || null, message.semanticDraft || null, message.updatedAt);
+        updateProjection(message.version || state.version, message.projection || null, message.semanticDraft || null, message.visualObservation || state.visualObservation, message.updatedAt);
       } else if (message.type === 'semantic_draft_updated') {
         setStatus('connected');
-        updateProjection(message.version || state.version, state.projection, message.semanticDraft || null, null);
+        updateProjection(message.version || state.version, state.projection, message.semanticDraft || null, state.visualObservation, null);
+      } else if (message.type === 'visual_observation_updated') {
+        state.visualObservation = message.visualObservation || null;
+        state.version = message.version || state.version;
+        syncUi();
       }
     });
 
@@ -255,6 +262,7 @@
     state.version = saved ? saved.version || 0 : 0;
     state.projection = saved ? saved.projection : null;
     state.semanticDraft = null;
+    state.visualObservation = null;
     state.onActivity = options.onActivity || null;
     syncUi();
     publishSelection(backend, world, state.roomId);
@@ -263,7 +271,7 @@
       restoreSavedCapture(backend, world, state.roomId)
         .then((room) => {
           if (seq !== state.enterSeq || !state.enabled || state.roomId !== (world.roomId || world.id)) return;
-          if (room) updateProjection(room.version || state.version, room.projection || state.projection, room.semanticDraft || state.semanticDraft, room.updatedAt);
+          if (room) updateProjection(room.version || state.version, room.projection || state.projection, room.semanticDraft || state.semanticDraft, room.visualObservation || state.visualObservation, room.updatedAt);
           setStatus('loaded');
         })
         .catch((error) => {
@@ -288,6 +296,7 @@
     state.version = 0;
     state.projection = null;
     state.semanticDraft = null;
+    state.visualObservation = null;
     syncUi();
     if (shouldClearSelection) clearSelection(backendUrl);
   }

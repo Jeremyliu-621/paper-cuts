@@ -18,8 +18,10 @@ from .schemas import (
     SemanticAnswer,
     SemanticDraft,
     SemanticDraftUpdatedMessage,
+    VisualObservation,
+    VisualObservationUpdatedMessage,
 )
-from .agent_runtime import make_stub_job
+from .agent_runtime import initial_visual_observation, make_stub_job, stale_visual_observation
 from .semantic import bind_answer, build_semantic_draft
 
 MAX_RECENT_EVENTS = 20
@@ -32,6 +34,7 @@ class RoomState:
     capture: dict[str, Any] | None = None
     projection: dict[str, Any] | None = None
     semantic_draft: SemanticDraft | None = None
+    visual_observation: VisualObservation | None = None
     semantic_answers: list[SemanticAnswer] = field(default_factory=list)
     agent_jobs: dict[str, AgentJobResponse] = field(default_factory=dict)
     world_id: str | None = None
@@ -59,6 +62,7 @@ class RoomRegistry:
             capture=room.capture,
             projection=room.projection,
             semanticDraft=room.semantic_draft,
+            visualObservation=room.visual_observation,
             updatedAt=room.updated_at,
             recentEvents=list(room.recent_events),
         )
@@ -135,6 +139,11 @@ class RoomRegistry:
             client_id=message.client_id,
             prior_answers=room.semantic_answers,
         )
+        room.visual_observation = initial_visual_observation(
+            room_id=room.room_id,
+            world_id=room.world_id,
+            capture_version=room.version,
+        )
         event = RecentEvent(
             version=room.version,
             updatedAt=room.updated_at,
@@ -149,11 +158,15 @@ class RoomRegistry:
             updatedAt=room.updated_at,
             projection=message.projection,
             semanticDraft=room.semantic_draft,
+            visualObservation=room.visual_observation,
             sourceClientId=message.client_id,
         )
 
     def semantic_draft(self, room_id: str) -> SemanticDraft | None:
         return self.get_room(room_id).semantic_draft
+
+    def visual_observation(self, room_id: str) -> VisualObservation | None:
+        return self.get_room(room_id).visual_observation
 
     def enqueue_agent_job(self, room_id: str, request: AgentJobRequest) -> AgentJobResponse:
         room = self.get_room(room_id)
@@ -192,6 +205,31 @@ class RoomRegistry:
             sourceClientId=message.client_id,
         )
 
+    def store_visual_observation(
+        self,
+        room_id: str,
+        observation: VisualObservation,
+    ) -> VisualObservationUpdatedMessage | None:
+        room = self.get_room(room_id)
+        current = room.visual_observation
+        if observation.capture_version != room.version:
+            if current and current.job_id == observation.job_id:
+                room.visual_observation = stale_visual_observation(observation)
+                return VisualObservationUpdatedMessage(
+                    roomId=room.room_id,
+                    version=room.version,
+                    visualObservation=room.visual_observation,
+                )
+            return None
+        if current and current.job_id != observation.job_id:
+            return None
+        room.visual_observation = observation
+        return VisualObservationUpdatedMessage(
+            roomId=room.room_id,
+            version=room.version,
+            visualObservation=room.visual_observation,
+        )
+
     async def broadcast(self, room_id: str, update: ProjectionUpdatedMessage) -> None:
         stale: list[WebSocket] = []
         payload = update.model_dump(mode="json", by_alias=True)
@@ -204,6 +242,17 @@ class RoomRegistry:
             self.disconnect(room_id, websocket)
 
     async def broadcast_semantic(self, room_id: str, update: SemanticDraftUpdatedMessage) -> None:
+        stale: list[WebSocket] = []
+        payload = update.model_dump(mode="json", by_alias=True)
+        for websocket in list(self._connections.get(room_id, set())):
+            try:
+                await websocket.send_json(payload)
+            except Exception:
+                stale.append(websocket)
+        for websocket in stale:
+            self.disconnect(room_id, websocket)
+
+    async def broadcast_visual(self, room_id: str, update: VisualObservationUpdatedMessage) -> None:
         stale: list[WebSocket] = []
         payload = update.model_dump(mode="json", by_alias=True)
         for websocket in list(self._connections.get(room_id, set())):

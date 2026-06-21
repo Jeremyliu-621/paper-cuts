@@ -65,13 +65,40 @@ function confirmedCandidate(overrides = {}) {
   const { api } = loadFacade()
   const patch = api.buildPatchFromSemanticDraft(
     { roomId: 'room-1', worldId: 'world-1', captureVersion: 3, candidates: [confirmedCandidate()] },
-    { mapId: 'meadow' },
+    { mapId: 'meadow', replacePlatforms: true },
   )
 
   assert.equal(patch.type, 'magicboard_world_patch')
-  assert.equal(patch.operations.length, 1)
-  assert.equal(patch.operations[0].platform.kind, 'trampoline')
-  assert.equal(patch.operations[0].platform.bounce, 1200)
+  assert.equal(patch.operations.length, 2)
+  assert.equal(patch.operations[0].type, 'replace_platforms')
+  assert.equal(patch.operations[1].platform.kind, 'trampoline')
+  assert.equal(patch.operations[1].platform.bounce, 1200)
+}
+
+{
+  const { api } = loadFacade()
+  const expectations = {
+    solid: { kind: 'drawn', pass: false },
+    pass: { kind: 'float', pass: true },
+    bounce: { kind: 'trampoline', bounce: 1200 },
+    hurt: { kind: 'spikes', hurt: true },
+    ice: { kind: 'crystal' },
+    breakable: { kind: 'box', hp: 4 },
+  }
+
+  Object.entries(expectations).forEach(([behavior, expected], index) => {
+    const platform = api.platformFromCandidate(confirmedCandidate({
+      candidateId: 'candidate-' + behavior,
+      geometryHash: 'hash-' + behavior,
+      sourceIds: ['shape-' + index],
+      answer: { role: 'platform', behavior },
+    }))
+    assert.equal(platform.kind, expected.kind)
+    if ('pass' in expected) assert.equal(platform.pass, expected.pass)
+    if ('bounce' in expected) assert.equal(platform.bounce, expected.bounce)
+    if ('hurt' in expected) assert.equal(Boolean(platform.hurt), expected.hurt)
+    if ('hp' in expected) assert.equal(platform.hp, expected.hp)
+  })
 }
 
 {
@@ -95,6 +122,9 @@ function confirmedCandidate(overrides = {}) {
     version: 1,
     target: { mapId: 'meadow' },
     operations: [
+      {
+        type: 'replace_platforms',
+      },
       {
         type: 'add_platform',
         platform: {
@@ -126,11 +156,11 @@ function confirmedCandidate(overrides = {}) {
   const result = api.applyPatch(patch)
 
   assert.equal(result.ok, true)
-  assert.equal(result.applied, 3)
+  assert.equal(result.applied, 4)
   assert.equal(saves.length, 1)
   assert.deepEqual(JSON.parse(JSON.stringify(data.stage.spawns)), [{ x: 300, y: 760 }, { x: 500, y: 760 }])
-  assert.equal(data.stage.platforms.length, 3)
-  assert.equal(data.stage.platforms[0].kind, 'ground')
+  assert.equal(data.stage.platforms.length, 2)
+  assert.equal(data.stage.platforms.some((platform) => platform.kind === 'ground'), false)
   assert.equal(data.stage.platforms.some((platform) => platform.source?.candidateId === 'old-generated' && platform.x === 100), false)
   assert.equal(data.stage.platforms.some((platform) => platform.source?.candidateId === 'candidate-new'), true)
   assert.equal(data.stage.platforms.some((platform) => platform.source?.candidateId === 'old-generated' && platform.kind === 'crystal'), true)

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import time
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -7,6 +10,8 @@ from app.rooms import rooms
 
 
 def setup_function() -> None:
+    os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("MAGICBOARD_VLM_MODEL", None)
     rooms.reset()
 
 
@@ -61,6 +66,7 @@ def test_empty_room_capture() -> None:
         "capture": None,
         "projection": None,
         "semanticDraft": None,
+        "visualObservation": None,
         "updatedAt": None,
         "recentEvents": [],
     }
@@ -159,6 +165,8 @@ def test_http_capture_save_updates_room_capture() -> None:
     assert body["capture"] == capture
     assert body["projection"] == projected
     assert body["semanticDraft"]["roomId"] == "desktop-saved"
+    assert body["visualObservation"]["status"] == "missing_key"
+    assert body["visualObservation"]["captureVersion"] == 1
     assert client.get("/rooms/desktop-saved/capture").json()["capture"] == capture
 
 
@@ -171,6 +179,7 @@ def test_websocket_capture_updates_room_and_http_capture() -> None:
         hello = websocket.receive_json()
         assert hello["type"] == "hello"
         assert hello["projection"] is None
+        assert hello["visualObservation"] is None
         websocket.send_json(
             {
                 "type": "canvas_capture",
@@ -187,6 +196,7 @@ def test_websocket_capture_updates_room_and_http_capture() -> None:
     assert update["version"] == 1
     assert update["projection"] == projected
     assert update["semanticDraft"]["captureVersion"] == 1
+    assert update["visualObservation"]["status"] == "missing_key"
     assert update["sourceClientId"] == "ipad"
 
     response = client.get("/rooms/demo/capture")
@@ -195,6 +205,7 @@ def test_websocket_capture_updates_room_and_http_capture() -> None:
     assert body["capture"] == capture
     assert body["projection"] == projected
     assert body["semanticDraft"]["captureVersion"] == 1
+    assert body["visualObservation"]["status"] == "missing_key"
     assert body["updatedAt"]
     assert body["recentEvents"] == [
         {
@@ -224,7 +235,8 @@ def test_new_connection_receives_latest_projection_in_hello() -> None:
         assert hello["type"] == "hello"
         assert hello["version"] == 1
         assert hello["projection"] == projected
-        assert hello["semanticDraft"]["candidates"][0]["question"]["prompt"] == "Is this a platform?"
+        assert hello["semanticDraft"]["candidates"][0]["question"]["prompt"] == "What should this platform do?"
+        assert hello["visualObservation"]["status"] == "missing_key"
 
 
 def test_malformed_messages_return_errors_without_closing_socket() -> None:
@@ -297,7 +309,7 @@ def test_semantic_draft_extracts_rectangles_and_thick_horizontal_strokes() -> No
     assert len(draft["candidates"]) == 2
     assert {candidate["extractor"] for candidate in draft["candidates"]} == {"rectangle", "stroke"}
     assert len(draft["questions"]) == 2
-    assert all(question["prompt"] == "Is this a platform?" for question in draft["questions"])
+    assert all(question["prompt"] == "What should this platform do?" for question in draft["questions"])
 
 
 def test_semantic_draft_extracts_conservative_grouped_strokes() -> None:
@@ -435,6 +447,92 @@ def test_websocket_accepts_clarification_answer_and_broadcasts_semantic_update()
     assert semantic_update["type"] == "semantic_draft_updated"
     assert semantic_update["semanticDraft"]["candidates"][0]["status"] == "confirmed"
     assert semantic_update["semanticDraft"]["candidates"][0]["answer"]["behavior"] == "pass"
+
+
+def test_visual_observation_endpoint_reports_missing_key(monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    client = TestClient(app)
+
+    client.post(
+        "/rooms/no-key/capture",
+        json={"type": "canvas_capture", "capture": {"ok": True}, "projection": projection()},
+    )
+
+    response = client.get("/rooms/no-key/visual-observation")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "magicboard_visual_observation"
+    assert body["status"] == "missing_key"
+    assert body["captureVersion"] == 1
+    assert body["errors"] == ["missing OPENAI_API_KEY"]
+
+
+def test_mocked_vlm_response_stores_and_broadcasts_observation(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("MAGICBOARD_VLM_MODEL", "gpt-test")
+
+    def fake_observation(*, projection: dict) -> dict:
+        return {
+            "description": "A single horizontal platform is drawn near the bottom.",
+            "hints": [
+                {
+                    "kind": "platform",
+                    "confidence": 0.91,
+                    "description": "wide ledge",
+                    "behavior": "solid",
+                    "sourceIds": ["stroke-1"],
+                }
+            ],
+        }
+
+    monkeypatch.setattr("app.agent_runtime._request_openai_visual_observation", fake_observation)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/rooms/vlm-ready") as websocket:
+        websocket.receive_json()
+        websocket.send_json({"type": "canvas_capture", "capture": {"ok": True}, "projection": projection()})
+        projection_update = websocket.receive_json()
+        visual_update = websocket.receive_json()
+
+    assert projection_update["visualObservation"]["status"] == "pending"
+    assert visual_update["type"] == "visual_observation_updated"
+    assert visual_update["visualObservation"]["status"] == "ready"
+    assert visual_update["visualObservation"]["model"] == "gpt-test"
+    assert visual_update["visualObservation"]["description"] == "A single horizontal platform is drawn near the bottom."
+    assert visual_update["visualObservation"]["hints"][0]["sourceIds"] == ["stroke-1"]
+    assert client.get("/rooms/vlm-ready/visual-observation").json()["status"] == "ready"
+
+
+def test_coalesced_vlm_jobs_only_latest_capture_becomes_current(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls = {"count": 0}
+
+    def fake_observation(*, projection: dict) -> dict:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            time.sleep(0.05)
+        return {"description": f"observation {calls['count']}", "hints": []}
+
+    monkeypatch.setattr("app.agent_runtime._request_openai_visual_observation", fake_observation)
+    client = TestClient(app)
+    first = projection()
+    second = projection()
+    second["strokes"][0]["id"] = "stroke-2"
+    second["strokes"][0]["sourceId"] = "stroke-2"
+
+    with client.websocket_connect("/ws/rooms/coalesce") as websocket:
+        websocket.receive_json()
+        websocket.send_json({"type": "canvas_capture", "capture": {"first": True}, "projection": first})
+        assert websocket.receive_json()["version"] == 1
+        websocket.send_json({"type": "canvas_capture", "capture": {"second": True}, "projection": second})
+        assert websocket.receive_json()["version"] == 2
+        visual_update = websocket.receive_json()
+
+    assert visual_update["type"] == "visual_observation_updated"
+    assert visual_update["version"] == 2
+    assert visual_update["visualObservation"]["captureVersion"] == 2
+    assert client.get("/rooms/coalesce/visual-observation").json()["captureVersion"] == 2
 
 
 def test_agent_job_is_stubbed_idempotent_and_not_in_hot_path(monkeypatch) -> None:

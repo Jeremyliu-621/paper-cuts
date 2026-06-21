@@ -5,7 +5,7 @@
 
   const DS = global.DS = global.DS || {};
   const ALLOWED_KINDS = new Set(['ground', 'wood', 'stone', 'crystal', 'box', 'float', 'trampoline', 'spikes', 'cannon', 'drawn']);
-  const ALLOWED_OPS = new Set(['add_platform', 'set_spawns']);
+  const ALLOWED_OPS = new Set(['replace_platforms', 'add_platform', 'set_spawns']);
 
   function finite(value) {
     return typeof value === 'number' && Number.isFinite(value);
@@ -65,6 +65,8 @@
     const platforms = (draft && draft.candidates ? draft.candidates : [])
       .map(platformFromCandidate)
       .filter(Boolean);
+    const operations = platforms.map((platform) => ({ type: 'add_platform', platform }));
+    if (options.replacePlatforms) operations.unshift({ type: 'replace_platforms' });
     return {
       type: 'magicboard_world_patch',
       version: 1,
@@ -72,7 +74,7 @@
       roomId: options.roomId || (draft && draft.roomId) || null,
       captureVersion: draft ? draft.captureVersion : 0,
       target: { mapId: options.mapId || 'meadow' },
-      operations: platforms.map((platform) => ({ type: 'add_platform', platform })),
+      operations,
     };
   }
 
@@ -104,6 +106,7 @@
         errors.push('operation ' + index + ' unsupported type');
         return;
       }
+      if (operation.type === 'replace_platforms') return;
       if (operation.type === 'add_platform') errors.push.apply(errors, validatePlatform(operation.platform, index));
       if (operation.type === 'set_spawns') {
         const spawns = operation.spawns || [];
@@ -135,6 +138,10 @@
     });
     if (incomingCandidateIds.size) {
       stage.platforms = (stage.platforms || []).filter((platform) => !sameGeneratedSource(platform, incomingCandidateIds));
+    }
+
+    if (patch.operations.some((operation) => operation.type === 'replace_platforms')) {
+      stage.platforms = [];
     }
 
     patch.operations.forEach((operation) => {
