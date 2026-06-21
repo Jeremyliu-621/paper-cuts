@@ -723,6 +723,15 @@
     let floorBottom = -Infinity; // the lowest platform bottom — anything resting here is the base ground
     for (const q of plats) if (!q.move) floorBottom = Math.max(floorBottom, q.y + q.h);
     const grounded = computeGrounded(plats, floorBottom); // who actually reaches the floor (pillar footings)
+    // the altitude of the HIGHEST sizeable elevated platform — cottages perch on tops near this band
+    let townY = Infinity;
+    for (const q of plats) {
+      if (q.move || q.w < 220) continue;
+      const qBase = !q.pass && q.h >= 100 && (q.y + q.h) >= floorBottom - 40;
+      const qGim = q.kind === 'cannon' || q.kind === 'trampoline' || q.kind === 'spikes' || q.kind === 'box';
+      if (qBase || qGim) continue;
+      townY = Math.min(townY, q.y);
+    }
     for (const p of plats) {
       if (p.move) continue; // swinging/moving platforms ride free — no anchored dressing
       const gimmick = p.kind === 'cannon' || p.kind === 'trampoline' || p.kind === 'spikes' || p.kind === 'box';
@@ -733,20 +742,28 @@
       // everything anchors to the platform's real underside CONTOUR, so it follows a tilt/curve.
       if (!isBase) {
         const contour = undersideContour(p);
+        // pour a WATERFALL from an edge at world x down to the grounded surface far below (if any), with mist
+        const maybeFall = (x, sd) => {
+          const u = undersideAt(contour, x), ey = u ? u.y : pb;
+          const s = surfaceBelow(plats, x, ey + 6, p, grounded);
+          if (s && s.y - ey > 220 && DS.makeRng(sd)() < 0.5 * Math.min(1.2, density)) behind.push({ t: 'waterfall', x, y0: ey, y1: s.y, seed: sd });
+        };
         const sp = supportSpan(plats, p, grounded);
         if (!sp) {
           // truly floating → a jagged island that follows the (possibly tilted) underside + foliage
           behind.push({ t: 'island', top: undersideStrip(contour, p.x, pr), depth: Math.min(150, Math.max(46, p.w * 0.4)), seed: seed + 1 });
           addHang(front, contour, p.x + p.w * 0.28, p.x + p.w * 0.72, density, seed + 2);
+          if (density >= 0.6) maybeFall(p.x + p.w * (DS.makeRng(seed + 8)() < 0.5 ? 0.3 : 0.7), seed + 560);
         } else {
           const l = Math.max(p.x, sp.l), r = Math.min(pr, sp.r), span = r - l;
           const pillars = []; // collect pillars (to add a buttress to a tall lone one afterwards)
+          const pierTops = []; // each placed pier's top anchor — for stringing bunting between them
           // drop a pillar from an anchor point (ax,ay,tilt) to the surface beneath; returns it or null
           const addPier = (ax, ay, tlt, idx, thin, plant) => {
             const sup = surfaceBelow(plats, ax, ay + 2, p, grounded);
             if (!sup || sup.y - ay <= GAP_MIN || sup.y - ay >= PILLAR_MAX) return null;
             const d = { t: 'pillar', x: ax, topY: ay, botY: sup.y, tilt: tlt, botTilt: sup.tilt, thin, seed: seed + 10 + idx * 7 };
-            behind.push(d); pillars.push(d);
+            behind.push(d); pillars.push(d); pierTops.push([ax, ay]);
             if (plant && density >= 0.5) front.push({ t: 'plant', x: ax, y: sup.y, tilt: sup.tilt, kind: pick(DS.makeRng(seed + 20 + idx), TOP_KINDS), s: 0.78, seed: seed + 20 + idx });
             if (sup.y - ay > 240 && DS.makeRng(seed + 80 + idx)() < 0.38 * Math.min(1.2, density)) // ivy climbs some tall pillars
               front.push({ t: 'ivy', x: ax, topY: ay, botY: sup.y, side: idx % 2 ? 1 : -1, seed: seed + 85 + idx });
@@ -794,23 +811,49 @@
           // a buttress strut for a tall lone pier
           if (density >= 0.7 && pillars.length === 1 && pillars[0].botY - pillars[0].topY > 300)
             behind.push({ t: 'buttress', x: pillars[0].x, topY: pillars[0].topY, botY: pillars[0].botY, dir: pillars[0].x < (l + r) / 2 ? 1 : -1, seed: seed + 70 });
+          // festive BUNTING strung in the upper part of the bay between adjacent piers (some of them)
+          if (density >= 0.6 && pierTops.length >= 2) {
+            pierTops.sort((a, b) => a[0] - b[0]);
+            for (let i = 0; i < pierTops.length - 1; i++) {
+              const A = pierTops[i], B = pierTops[i + 1], gap = B[0] - A[0];
+              if (gap < 70 || gap > 520) continue;
+              if (DS.makeRng(seed + 300 + i)() < 0.6) front.push({ t: 'bunting', x0: A[0], y0: A[1], x1: B[0], y1: B[1], seed: seed + 305 + i });
+            }
+          }
           // overhangs → a jagged island edge (and foliage) on each jutting side, following the underside
-          if (l - p.x > 50) { behind.push({ t: 'island', top: undersideStrip(contour, p.x, l + 8), depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, contour, p.x + 8, l - 8, density, seed + 32); }
-          if (pr - r > 50) { behind.push({ t: 'island', top: undersideStrip(contour, r - 8, pr), depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, contour, r + 8, pr - 8, density, seed + 42); }
+          if (l - p.x > 50) { behind.push({ t: 'island', top: undersideStrip(contour, p.x, l + 8), depth: Math.min(96, (l - p.x) * 0.7), seed: seed + 31 }); addHang(front, contour, p.x + 8, l - 8, density, seed + 32); maybeFall(p.x + (l - p.x) * 0.5, seed + 520); }
+          if (pr - r > 50) { behind.push({ t: 'island', top: undersideStrip(contour, r - 8, pr), depth: Math.min(96, (pr - r) * 0.7), seed: seed + 41 }); addHang(front, contour, r + 8, pr - 8, density, seed + 42); maybeFall(r + (pr - r) * 0.5, seed + 540); }
         }
       }
-      // ---- a few varied plants ON TOP, sitting on the real surface and tilting with it ----
+      // ---- stuff ON TOP, sitting on the real surface and tilting with it ----
       if (!gimmick && p.w >= 110) {
         const topC = topContour(p);
-        const n = Math.max(0, Math.round((p.w / 300) * density));
+        const eL = topAt(topC, p.x + 30), eR = topAt(topC, pr - 30);
+        const flatTop = eL && eR && Math.abs(eL.y - eR.y) < p.w * 0.18;
+        // a little hilltop HAMLET: cottages perch on the highest wide, flat, elevated tops
+        const isTown = !isBase && flatTop && p.w >= 240 && p.y <= townY + 150 && density >= 0.5;
+        if (isTown) {
+          const houses = Math.max(1, Math.min(3, Math.round(p.w / 320)));
+          for (let i = 0; i < houses; i++) {
+            const r3 = DS.makeRng(seed + 600 + i * 17);
+            const hx = p.x + p.w * ((i + 0.5) / houses) + r3.sym(p.w * 0.10), ta = topAt(topC, hx);
+            front.push({ t: 'house', x: hx, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, s: 0.92 + r3() * 0.34, seed: seed + 600 + i });
+          }
+        }
+        // a few varied plants — fewer when houses already crowd the roof
+        const n = Math.max(0, Math.round((p.w / (isTown ? 620 : 300)) * density));
         for (let i = 0; i < n; i++) {
           const r2 = DS.makeRng(seed + 700 + i * 29);
           const x = p.x + 32 + (p.w - 64) * r2(), ta = topAt(topC, x);
           front.push({ t: 'plant', x, y: ta ? ta.y : p.y, tilt: ta ? ta.tilt : 0, kind: pick(r2, isBase ? TOP_KINDS_BIG : TOP_KINDS), s: 0.76 + r2() * 0.5, seed: seed + 700 + i });
         }
+        // a still POND on a wide flat top now and then (not where a hamlet already sits)
+        if (!isTown && flatTop && p.w >= 320 && density >= 0.6 && DS.makeRng(seed + 940)() < 0.3) {
+          const px2 = p.x + p.w * (0.32 + 0.36 * DS.makeRng(seed + 941)()), ta = topAt(topC, px2);
+          front.push({ t: 'pond', x: px2, y: ta ? ta.y : p.y, w: Math.min(150, p.w * 0.3), seed: seed + 942 });
+        }
         // a low railing along a wide, roughly-flat top (some of them) — reads as a balcony/parapet
-        const eL = topAt(topC, p.x + 30), eR = topAt(topC, pr - 30);
-        if (p.w > 300 && density >= 0.6 && eL && eR && Math.abs(eL.y - eR.y) < p.w * 0.2 && DS.makeRng(seed + 900)() < 0.55) {
+        if (p.w > 300 && !isTown && density >= 0.6 && flatTop && DS.makeRng(seed + 900)() < 0.5) {
           const steps = Math.max(3, Math.round(p.w / 70)), pts = [];
           for (let i = 0; i <= steps; i++) { const x = p.x + 24 + (p.w - 48) * (i / steps), ta = topAt(topC, x); pts.push([x, ta ? ta.y : p.y]); }
           front.push({ t: 'railing', pts, seed: seed + 910 });
@@ -954,11 +997,61 @@
       { width: 4, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
   }
 
+  // a waterfall spilling from a high edge (x,y0) to the surface below (y1): a few wavering streaks
+  // with a puff of mist where it pours over the lip and where it lands.
+  function drawWaterfall(ctx, it) {
+    const rnd = DS.makeRng(it.seed), x = it.x, y0 = it.y0, y1 = it.y1, h = y1 - y0;
+    ctx.globalAlpha = 0.55;
+    for (let i = -2; i <= 2; i++) {
+      const pts = [];
+      for (let k = 0; k <= 10; k++) { const t = k / 10; pts.push([x + i * 7 + Math.sin(t * 7 + i) * 3, y0 + t * h]); }
+      D.strokePts(ctx, pts, { width: 2.4, color: SCN, passes: 1 });
+    }
+    ctx.globalAlpha = 1;
+    for (let i = -2; i <= 2; i++) D.circle(ctx, x + i * 9, y1 - 2, 6 + rnd() * 3, { width: 2, color: SCN, rnd, fill: D.COL.paper }); // splash pool
+    for (let i = -1; i <= 1; i++) D.circle(ctx, x + i * 8, y0, 5 + rnd() * 2, { width: 2, color: SCN, rnd, fill: D.COL.paper }); // lip spray
+  }
+
   function drawDressBehind(ctx, it) {
     if (it.t === 'pillar') drawPillar(ctx, it);
     else if (it.t === 'island') drawIsland(ctx, it);
     else if (it.t === 'arch') drawArch(ctx, it);
     else if (it.t === 'buttress') drawButtress(ctx, it);
+    else if (it.t === 'waterfall') drawWaterfall(ctx, it);
+  }
+  // a little cottage perched on a roof surface: body + pitched roof + chimney, a door and a window.
+  function drawHouse(ctx, it) {
+    const rnd = DS.makeRng(it.seed), s = it.s || 1, flip = rnd() < 0.5 ? 1 : -1;
+    ctx.save(); ctx.translate(it.x, it.y); ctx.rotate(it.tilt || 0); ctx.scale(s * flip, s);
+    const bw = 38, bh = 28, eave = -bh, peak = eave - 20, midRoof = (eave + peak) / 2;
+    D.strokePts(ctx, [[-bw / 2, 0], [-bw / 2, eave], [bw / 2, eave], [bw / 2, 0]], { width: 3, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // body
+    D.strokePts(ctx, [[-bw / 2 - 4, eave], [0, peak], [bw / 2 + 4, eave]], { width: 3.2, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 }); // gable roof
+    D.strokePts(ctx, [[bw * 0.2, midRoof + 1], [bw * 0.2, peak - 5], [bw * 0.32, peak - 5], [bw * 0.32, midRoof - 3]], { width: 2.4, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // chimney
+    D.strokePts(ctx, [[-9, 0], [-9, -12], [-3, -12], [-3, 0]], { width: 2.2, color: SCN, rnd, fill: D.COL.paper, passes: 1 }); // door
+    const wx = 6, wy = -13; // window with a little cross
+    D.strokePts(ctx, [[wx - 4, wy - 4], [wx + 4, wy - 4], [wx + 4, wy + 4], [wx - 4, wy + 4]], { width: 2, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    D.line(ctx, wx, wy - 4, wx, wy + 4, { width: 1.4, color: SCN, passes: 1 }); D.line(ctx, wx - 4, wy, wx + 4, wy, { width: 1.4, color: SCN, passes: 1 });
+    ctx.restore();
+  }
+  // festive bunting: a sagging cord between two points hung with little triangular flags.
+  function drawBunting(ctx, it) {
+    const rnd = DS.makeRng(it.seed), x0 = it.x0, y0 = it.y0, x1 = it.x1, y1 = it.y1, dx = x1 - x0;
+    const sag = Math.min(30, Math.abs(dx) * 0.14) + 6, N = 12, cord = [];
+    for (let i = 0; i <= N; i++) { const t = i / N; cord.push([x0 + dx * t, y0 + (y1 - y0) * t + Math.sin(t * Math.PI) * sag]); }
+    D.strokePts(ctx, cord, { width: 2, color: SCN, rnd, passes: 1 });
+    const flags = Math.max(3, Math.round(Math.abs(dx) / 32));
+    for (let i = 1; i < flags; i++) {
+      const t = i / flags, cx = x0 + dx * t, cy = y0 + (y1 - y0) * t + Math.sin(t * Math.PI) * sag;
+      D.strokePts(ctx, [[cx - 5, cy], [cx + 5, cy], [cx, cy + 10]], { width: 1.8, color: SCN, rnd, closed: true, fill: D.COL.paper, passes: 1 });
+    }
+  }
+  // a still pond resting on a flat top: a soft basin outline with a couple of ripple lines.
+  function drawPond(ctx, it) {
+    const rnd = DS.makeRng(it.seed), x = it.x, y = it.y - 1, rx = it.w / 2, ry = Math.max(6, it.w * 0.07);
+    D.ellipse(ctx, x, y, rx, ry, { width: 2.4, color: SCN, rnd, fill: D.COL.paper, wob: 1 });
+    ctx.globalAlpha = 0.5;
+    for (let i = 0; i < 2; i++) D.wavy(ctx, x - rx * 0.55, x + rx * 0.55, y - 1 + i * 3, { amp: 1.4, wavelen: 16, width: 1.5, color: SCN, passes: 1 });
+    ctx.globalAlpha = 1;
   }
   // ivy climbing up a pillar, with little leaves
   function drawIvy(ctx, it) {
@@ -1004,6 +1097,9 @@
     else if (it.t === 'ivy') drawIvy(ctx, it);
     else if (it.t === 'railing') drawRailing(ctx, it);
     else if (it.t === 'bridge') drawBridge(ctx, it);
+    else if (it.t === 'house') drawHouse(ctx, it);
+    else if (it.t === 'bunting') drawBunting(ctx, it);
+    else if (it.t === 'pond') drawPond(ctx, it);
   }
 
   // compute (and cache) the derived dressing for a stage. Key = density + every platform's box, so
@@ -1101,15 +1197,20 @@
     ctx.beginPath(); pts.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.stroke();
     ctx.globalAlpha = 1; ctx.restore();
   }
-  // a puffy cumulus: rounded tops on a flat-ish base, white fill, faint LIGHT outline over the tops
+  // a detailed hand-drawn doodle cloud: ONE continuous wobbly outline with several rounded bumps
+  // on top (sitting edge-to-edge), a gently scalloped underside, and a little inner curl. Drawn in
+  // the marker style via strokePts (so it wobbles like the rest of the art); white fill, soft-gray
+  // line (not harsh black).
   function softCloud(ctx, x, y, s) {
-    const bumps = [[-42, 4, 16], [-22, -7, 24], [2, -13, 28], [26, -7, 23], [46, 4, 17]];
+    const rnd = DS.makeRng(DS.hashSeed('cl' + Math.round(x) + '_' + Math.round(y)));
+    const B = [[-59, 13], [-22, 24], [22, 20], [57, 15]]; // [centreX, radius], bumps edge-to-edge
+    const pts = [];
+    for (const [bcx, br] of B) for (let i = 0; i <= 7; i++) { const a = Math.PI - Math.PI * (i / 7); pts.push([bcx + Math.cos(a) * br, -Math.sin(a) * br]); } // top bumps, left→right
+    pts.push([64, 18], [34, 22], [2, 18], [-32, 22], [-60, 18], [-72, 6]); // gently wavy underside (right→left)
     ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
-    ctx.fillStyle = CLOUD_C;
-    ctx.beginPath(); ctx.moveTo(-56, 8); ctx.quadraticCurveTo(0, 15, 58, 8); ctx.lineTo(58, 2); ctx.lineTo(-56, 2); ctx.closePath(); ctx.fill(); // flat base
-    for (const [bx, by, br] of bumps) { ctx.beginPath(); ctx.arc(bx, by, br, 0, 6.2832); ctx.fill(); } // puffy tops
-    ctx.globalAlpha = 0.3; ctx.strokeStyle = SOFT_LINE; ctx.lineWidth = 2; ctx.lineCap = 'round';
-    for (const [bx, by, br] of bumps) { ctx.beginPath(); ctx.arc(bx, by, br, Math.PI * 1.06, Math.PI * 1.94); ctx.stroke(); }
+    ctx.globalAlpha = 0.82;
+    D.strokePts(ctx, pts, { width: 2.6, color: BG_INK, rnd, closed: true, fill: CLOUD_C, jitter: 0.5, passes: 1 });
+    D.strokePts(ctx, [[-46, 1], [-40, 8], [-49, 9]], { width: 2.2, color: BG_INK, rnd, jitter: 0.4, passes: 1 }); // little inner curl
     ctx.restore(); ctx.globalAlpha = 1;
   }
   function bgSun(ctx, x, y) {
