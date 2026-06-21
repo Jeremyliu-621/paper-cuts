@@ -25,18 +25,17 @@
   #map { width:100%; height:26vh; background:#eae3d2; border:.5vh solid var(--ink); border-radius:1.6vh; display:block; touch-action:none; }
   #ghost { position:fixed; pointer-events:none; z-index:50; width:11vh; height:11vh; margin:-5.5vh 0 0 -5.5vh;
     background:rgba(255,255,255,.92); border:.5vh solid var(--accent); border-radius:1.4vh; display:none; }
-  #palette { display:flex; gap:.6vh; overflow-x:auto; padding:.2vh 0; -webkit-overflow-scrolling:touch; }
-  .chip { flex:0 0 auto; display:flex; align-items:center; gap:.5vh; padding:.4vh .9vh;
-    border:.25vh solid var(--ink); border-radius:1vh; background:#fff; font-weight:700; font-size:1.5vh; white-space:nowrap; }
-  .chip .e { font-size:2vh; line-height:1; }
-  .chip.sel { background:var(--accent); }
+  #picker { display:flex; align-items:center; gap:1vh; }
+  #picker .pk { font-weight:800; font-size:1.7vh; opacity:.8; }
+  #palette { font:inherit; font-weight:800; font-size:1.9vh; padding:.6vh 1.2vh;
+    border:.3vh solid var(--ink); border-radius:1vh; background:#fff; }
 </style>
 </head>
 <body>
 <div id="wrap">
   <div id="status">Connecting…</div>
-  <div id="palette"></div>
-  <div class="label" id="drawhint">Pick what you're making, then draw it</div>
+  <div id="picker"><span class="pk">Make:</span><select id="palette"></select></div>
+  <div class="label" id="drawhint">Draw anything — AI guesses it</div>
   <canvas id="draw"></canvas>
   <div id="tools">
     <button id="clear">Clear</button>
@@ -79,17 +78,17 @@
   function sendDraw(strokes, x, y){ if(ws && ws.readyState===1 && alive) ws.send(JSON.stringify({ t:'draw', strokes:strokes, x:x, y:y, label:(chosen&&chosen.l)||undefined })); }
 
   // ---------- category palette: a FIXED label = reliable mechanic + sprite (bypasses misclassification) ----------
-  var CATS=[{e:'🗡️',n:'Sword',l:'sword'},{e:'🔫',n:'Gun',l:'gun'},
+  var CATS=[{e:'🎲',n:'AI guess',l:''},
+    {e:'🗡️',n:'Sword',l:'sword'},{e:'🔫',n:'Gun',l:'gun'},
     {e:'🔥',n:'Fire',l:'fire'},{e:'💧',n:'Water',l:'water'},{e:'❄️',n:'Ice',l:'ice'},
     {e:'⚡',n:'Bolt',l:'lightning'},{e:'🌿',n:'Plant',l:'plant'},{e:'☠️',n:'Poison',l:'poison'},
     {e:'💣',n:'Bomb',l:'bomb'},{e:'🦘',n:'Bouncy',l:'spring'},{e:'🍎',n:'Heal',l:'fruit'},{e:'⭐',n:'Star',l:'star'}];
-  var chosen=null;   // null = no pick = let the AI guess (the default behaviour). Tap a chip to force it.
+  var chosen=CATS[0];   // default = AI guess (the regular recognition behaviour)
   var paletteEl=document.getElementById('palette'), drawhint=document.getElementById('drawhint');
-  function buildPalette(){ paletteEl.innerHTML=''; CATS.forEach(function(c){ var b=document.createElement('div');
-    b.className='chip'+(c===chosen?' sel':''); b.innerHTML='<span class="e">'+c.e+'</span>'+c.n;
-    b.onclick=function(){ chosen=(chosen===c)?null:c; buildPalette(); updateHint(); }; paletteEl.appendChild(b); }); }
-  function updateHint(){ drawhint.textContent = chosen ? ('Draw a '+chosen.n.toLowerCase()+'!') : 'Draw anything — AI guesses it  (or tap a type)'; }
-  buildPalette(); updateHint();
+  CATS.forEach(function(c,i){ var o=document.createElement('option'); o.value=String(i); o.textContent=c.e+'  '+c.n; paletteEl.appendChild(o); });
+  paletteEl.onchange=function(){ chosen=CATS[+paletteEl.value]||CATS[0]; updateHint(); };
+  function updateHint(){ drawhint.textContent = chosen.l ? ('Draw a '+chosen.n.toLowerCase()+'!') : 'Draw anything — AI guesses it'; }
+  updateHint();
 
   // ---------- draw canvas ----------
   var draw = document.getElementById('draw'), dctx = draw.getContext('2d');
