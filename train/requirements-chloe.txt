@@ -18,10 +18,12 @@
 # optimum-neuron pull its own matched transformers / trl range.
 
 optimum-neuron        # NeuronSFTTrainer + NeuronSFTConfig (Trainium-aware SFT-LoRA)
-peft                  # LoraConfig — the LoRA adapter we attach to Qwen2.5-1.5B-Instruct
+# trl/peft MUST match optimum-neuron 0.4.3's [training] extra — its sft_trainer.py imports
+# `clone_chat_template` from trl.models, which only exists at this exact trl version.
+trl==0.24.0           # SFTTrainer/SFTConfig base that NeuronSFTTrainer extends
+peft==0.17.0          # LoraConfig — the LoRA adapter we attach to Qwen2.5-1.5B-Instruct
 datasets              # load_dataset("json", ...) for data/chloe_pairs.jsonl
-trl                   # SFTTrainer/SFTConfig base that NeuronSFTTrainer extends (pulled via optimum-neuron, pinned here for clarity)
-accelerate            # training/loader helpers used under the hood
-transformers          # AutoTokenizer + base model load (let optimum-neuron pin its matched range)
+accelerate            # training/loader helpers (optimum-neuron 0.4.3 pins 1.8.1)
+transformers          # AutoTokenizer + base model load (optimum-neuron pins ~4.57.1)
 safetensors           # adapter_model.safetensors serialization
 sentencepiece         # tokenizer backend for the Qwen2.5 instruct model
