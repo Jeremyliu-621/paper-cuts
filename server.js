@@ -86,6 +86,7 @@ function openaiKey() {
 function recraftPrompt(label) {
   return `a ${label} as a polished fully-colored 2D game item sprite — vibrant saturated colors, ` +
     `clean bold outline, soft shading, single centered object on a plain white background. ` +
+    `The WHOLE object is fully visible with a small margin, zoomed out, not cropped, not touching the edges. ` +
     `NOT a black-and-white silhouette, NOT a plain line drawing — richly colored like a real game asset. ` +
     `No text, no sparkles, no decorations, no background scenery.`;
 }

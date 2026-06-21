@@ -90,7 +90,15 @@
       // anything" loop with zero menu. Otherwise use the caller's label as before.
       if (!label && (this.vlmEndpoint || this.recognizerEndpoint)) {
         const self = this;
-        this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts); });
+        // PARALLEL: start the sprite enhance NOW (image-driven, generic label) so it overlaps with
+        // recognition instead of waiting ~5s for it — roughly halves the time-to-good-sprite. The
+        // recognition result only drives the LABEL + mechanic + CHLOE (skipEnhance=true below).
+        if (this.falEndpoint || this.endpoint) {
+          const b64 = stripDataUrl(this._rasterizeUrl(strokes));
+          if (this.falEndpoint) this._falEnhanceInto(prop, b64, prop.label);
+          if (this.endpoint) this._enhanceInto(prop, b64, prop.label);
+        }
+        this.recognize(strokes).then(function (r) { self._applyRecognition(prop, r, strokes, opts, true); });
       } else {
         // use prop.label (always non-empty: defaults to 'thing') so a blank label never sends an
         // empty string to CHLOE/fal. opts.description (a typed phrase) drives CHLOE when present.
@@ -268,7 +276,7 @@
       const S = this.SIZE, cv = document.createElement('canvas'); cv.width = S; cv.height = S;
       const ctx = cv.getContext('2d');
       ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, S, S);
-      const bb = bbox(strokes), pad = 64;
+      const bb = bbox(strokes), pad = 120;   // generous margin so the enhancer has room and won't crop the object
       const sc = Math.min((S - pad * 2) / bb.w, (S - pad * 2) / bb.h);
       ctx.translate(S / 2, S / 2); ctx.scale(sc, sc); ctx.translate(-(bb.x + bb.w / 2), -(bb.y + bb.h / 2));
       ctx.strokeStyle = '#111'; ctx.lineWidth = 6 / sc; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -325,14 +333,16 @@
     // a recognition result -> relabel the prop, swap its instant mechanic to match the recognized
     // type, and fire CAELLUM (sprite) + CHLOE (mechanic graph) with the real name. Progressive: the
     // prop was already playing on a placeholder; this upgrades it in place when recognition returns.
-    _applyRecognition: function (prop, r, strokes, opts) {
+    _applyRecognition: function (prop, r, strokes, opts, skipEnhance) {
       const top = r && r.top;
       const label = (top && top.label) || 'thing';
       prop.label = label;
       prop.recognized = top || null;            // {category,label,archetype,element,confidence} for the HUD
       if (DS.Mechanics) { prop.mechanic = DS.Mechanics.defaultFor(label); prop.archetype = prop.mechanic.archetype; }
       const desc = (opts && opts.description) || label;
-      if (this.falEndpoint || this.endpoint) {
+      // skipEnhance: the sprite enhance was already kicked off in PARALLEL with recognition (see
+      // spawnFromStrokes) — don't fire a second one. Only the mechanic/CHLOE depend on the label.
+      if (!skipEnhance && (this.falEndpoint || this.endpoint)) {
         const b64 = stripDataUrl(this._rasterizeUrl(strokes));
         if (this.falEndpoint) this._falEnhanceInto(prop, b64, label);   // fast first pass
         if (this.endpoint) this._enhanceInto(prop, b64, label);          // polished pass (wins)
