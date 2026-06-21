@@ -14,6 +14,7 @@
   const AI = {
     endpoint: null,   // CAELLUM /enhance URL; null = placeholder only
     chloeEndpoint: null, // CHLOE /mechanic URL; null = default (instant) mechanic only
+    recognizerEndpoint: null, // RECOGNIZER /recognize URL; null = caller supplies the label (no auto-naming)
     SIZE: 512,        // rasterized sketch size sent to /enhance (matches the compiled shape)
 
     // set the CAELLUM endpoint and ping its health
@@ -33,6 +34,16 @@
       fetch(base + '/healthz').then(function (r) { return r.json(); })
         .then(function (h) { console.log('[DS.AI] CHLOE connected:', h); })
         .catch(function (e) { if (global.__showErr) global.__showErr('CHLOE /healthz failed: ' + (e && e.message || e)); });
+      return url;
+    },
+
+    // set the RECOGNIZER /recognize endpoint and ping its health (mirrors connect/connectChloe)
+    connectRecognizer: function (url) {
+      this.recognizerEndpoint = url;
+      const base = url.replace(/\/recognize\/?$/, '');
+      fetch(base + '/healthz').then(function (r) { return r.json(); })
+        .then(function (h) { console.log('[DS.AI] RECOGNIZER connected:', h); })
+        .catch(function (e) { if (global.__showErr) global.__showErr('RECOGNIZER /healthz failed: ' + (e && e.message || e)); });
       return url;
     },
 
@@ -123,6 +134,38 @@
         ctx.stroke();
       }
       return cv.toDataURL('image/png');
+    },
+
+    // strokes -> what the AI thinks it is. Resolves to the recognizer response ({results,confident,top})
+    // or null. The draw flow uses top.label instead of asking the kid to pick a category.
+    recognize: function (strokes) {
+      if (!this.recognizerEndpoint) return Promise.resolve(null);
+      const pixels = this._rasterize28(strokes);
+      return fetch(this.recognizerEndpoint, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pixels: pixels }),
+      }).then(function (r) { return r.json(); })
+        .then(function (out) { return (out && out.results) ? out : null; })
+        .catch(function (e) { if (global.__showErr) global.__showErr('recognize failed: ' + (e && e.message || e)); return null; });
+    },
+
+    // strokes -> a 28x28 grayscale (white ink on black = QuickDraw polarity) as 784 floats in [0,1].
+    _rasterize28: function (strokes) {
+      const N = 28, cv = document.createElement('canvas'); cv.width = N; cv.height = N;
+      const ctx = cv.getContext('2d');
+      ctx.fillStyle = '#000'; ctx.fillRect(0, 0, N, N);
+      const bb = bbox(strokes), pad = 3;
+      const sc = Math.min((N - pad * 2) / bb.w, (N - pad * 2) / bb.h);
+      ctx.translate(N / 2, N / 2); ctx.scale(sc, sc); ctx.translate(-(bb.x + bb.w / 2), -(bb.y + bb.h / 2));
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 / sc; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      for (const s of strokes) {
+        const p = s.pts; if (!p || !p.length) continue;
+        ctx.beginPath(); ctx.moveTo(p[0][0], p[0][1]);
+        for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1]);
+        ctx.stroke();
+      }
+      const data = ctx.getImageData(0, 0, N, N).data, px = new Array(N * N);
+      for (let i = 0; i < N * N; i++) px[i] = data[i * 4] / 255;   // R channel; white ink -> 1
+      return px;
     },
 
     // --- dev/testing: spawn a prop with a generated placeholder shape, no iPad needed ---

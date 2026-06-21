@@ -1,0 +1,11 @@
+# RECOGNIZER — deps for the doodle CNN (train/train_recognizer.py + services/recognizer/serve.py).
+#
+# Trainium box: torch + torch_xla come PRE-INSTALLED in the neuron venv — do NOT reinstall them.
+#   Just: pip install numpy pillow starlette uvicorn   (training needs numpy; serving adds the rest)
+# Colab/GPU or CPU: torch is preinstalled on Colab; elsewhere `pip install torch`.
+#
+numpy
+pillow            # serve.py image_b64 path (the `pixels` path needs only numpy)
+starlette         # serve app
+uvicorn           # serve ASGI runner
+# torch          # PRE-INSTALLED on the Neuron box (torch-neuronx) and on Colab — install only if absent
