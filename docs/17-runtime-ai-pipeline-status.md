@@ -198,8 +198,21 @@ Two genuinely cutting-edge AI features got committed by the teammate (both wired
 **These + draw→play + CHLOE = the demo.** Multimodal creation (draw + body) + a trained
 mechanic-synthesis model + real-time AI video gen. No Trainium needed.
 
-**Status/risk:** freshly pushed, need end-to-end testing. Pika/Kling cost per video (fal); MediaPipe
-needs a webcam + good alignment. Test before the demo. (Note: the teammate **removed** `voice.py`.)
+**Finisher TESTED 2026-06-21 — IT WORKS.** The "issues" the teammate hit were infra, not the feature:
+1. **Backend wouldn't boot** — `agent_runtime.py` imports `openai` but the venv was never synced (no
+   `uv` on this Mac). Fixed: `.venv/bin/pip install openai pillow certifi websockets python-dotenv`.
+2. **Old/unfunded FAL_KEY.** Now using the funded key in `.env` + `backend/.env`.
+- With both fixed: `POST /finishers/jobs` (Melt, sword doodle) → submitted → generated → `ready` with a
+  real `video.url` in **~108s**. Frame check: it correctly animates the doodle (Melt). Pika model
+  `fal-ai/pika/v1.5/pikaffects` via `queue.fal.run`.
+- **Latency:** ~108s first time. **BUT it caches** — `_cache_key` is `attacker|style|victim|skinHash|
+  source|motion|model` (NOT the captured frame), so the **2nd+ KO of the same skin+style is instant
+  (0.04s)**. **Demo strategy: pre-warm each character's finisher once before going on stage.**
+- Costs per Pika video (fal). MediaPipe AR recorder still needs a webcam test (can't do from CLI).
+- (Note: the teammate **removed** `voice.py`; `DEEPGRAM_API_KEY` is in the env but unused now.)
+
+**To run the backend:** `cd backend && .venv/bin/python -m uvicorn app.main:app --port 8000`
+(reads `backend/.env`). If it fails on `No module named 'openai'`, run the pip install above.
 
 Underlying KO hooks if you extend finishers: `fighter._takeHit`/`_ko`, KO blast in `effects.js` (~L56),
 KO boundary in `game.js` (~L423).
