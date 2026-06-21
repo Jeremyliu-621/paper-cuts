@@ -294,6 +294,13 @@ const requestHandler = async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
 
+  // CORS: the game page can be served from the Mac's LAN IP (so the iPad QR works) while it fetches
+  // /fal-enhance, /vlm-recognize, /healthz — a different origin. Allow it (local dev/demo server).
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Headers', 'content-type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
   // controller page (phones land here from the QR)
   if (p === '/c' || p === '/controller') {
     return sendFile(res, path.join(ROOT, 'controller.html'));
