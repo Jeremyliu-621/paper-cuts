@@ -173,17 +173,28 @@ sidestepping the cutout entirely. That's a design change, not done.
 
 ---
 
-## 8. Teammate's "finishers" — pointer for the separate agent
+## 8. Teammate's cutting-edge features (LANDED 2026-06-21 — these are the real wow)
 
-There is **no committed `finisher`/`fatality` feature** — the attempt didn't land in the tree. What
-exists to build on:
-- **KO system:** `js/fighter.js` `_ko` path (search `_ko`, `respawnT`, `stocks`); KO visuals in
-  `js/effects.js` (the "Smash-style KO blast" doodle flame-jet, ~line 56; KO beam set-pieces).
-- **KO boundary / camera:** `js/game.js` (KO boundary border ~line 423; "KO range" trembling ~line 919).
-- **Dev KO harness:** `js/main.js` ~line 1508 ("fire a KO flame-jet and freeze a frame mid-blast").
-- Modes that score on KO: `js/modes.js` (stocks, KO-to-score, gem-spill-on-KO).
-- A "finisher" would most naturally hook the moment a hit would KO (in `fighter._takeHit`/`_ko`):
-  trigger a special cinematic move/effect instead of the normal launch. Start there.
+Two genuinely cutting-edge AI features got committed by the teammate (both wired into `index.html`):
+
+- **AI KO finisher videos** — `js/finishers.js` + `backend/app/finishers.py` (`POST /finishers/jobs`,
+  `GET /finishers/jobs/{id}`). On a final KO, captures the doodle fighter render and submits to **fal
+  Pika (pikaffects v1.5 / pikaframes v2.2) / Kling motion-control** to generate a short cinematic
+  finisher (styles: Melt, Explode, Dissolve, Squish, Tear, Crumble, Cake-ify). Real-time **AI video
+  generation** as a game KO cut-in. Gameplay stays deterministic; the video is an optional cached
+  cosmetic.
+- **AR pose-recorded custom ultimates** — `js/ultimateRecorder.js`. Webcam → **MediaPipe pose
+  landmarker** → doodle skeleton → record a ~2.2s move from your body → custom ultimate clip.
+  "Gate ultimate recording on skeleton alignment" — actively being polished.
+
+**These + draw→play + CHLOE = the demo.** Multimodal creation (draw + body) + a trained
+mechanic-synthesis model + real-time AI video gen. No Trainium needed.
+
+**Status/risk:** freshly pushed, need end-to-end testing. Pika/Kling cost per video (fal); MediaPipe
+needs a webcam + good alignment. Test before the demo. (Note: the teammate **removed** `voice.py`.)
+
+Underlying KO hooks if you extend finishers: `fighter._takeHit`/`_ko`, KO blast in `effects.js` (~L56),
+KO boundary in `game.js` (~L423).
 
 ---
 
