@@ -23,6 +23,7 @@
       this._saveTimer = 0;
       // draw-tool state
       this.brush = 5; this.drawMode = 'auto'; this.draw = null; this.strokeHistory = [];
+      this.finisherVictimName = null; this.finisherStatus = '';
       this.Z = 8; // mannequin zoom (mannequin units -> view px)
       this._bindCanvas();
     }
@@ -229,6 +230,119 @@
       // stroke counts
       const counts = DS.skin.PARTS.map((k) => k + ': ' + ch.skin.parts[k].strokes.length).join('  ·  ');
       p.appendChild(el('div', 'ed-note', counts));
+
+      this._buildFinisher(p, ch);
+    }
+
+    _buildFinisher(p, ch) {
+      if (!DS.Finishers) return;
+      const finisher = DS.Finishers.ensure(ch);
+      const roster = this.data.roster.filter((name) => this.data.characters[name]);
+      if (!this.finisherVictimName || !this.data.characters[this.finisherVictimName]) {
+        this.finisherVictimName = roster.find((name) => name !== this.charName) || roster[0] || this.charName;
+      }
+      const victim = this.data.characters[this.finisherVictimName];
+      const skinHash = DS.Finishers.victimSkinHash(this.finisherVictimName, victim);
+      const key = DS.Finishers.cacheKey(this.charName, finisher.style, this.finisherVictimName, skinHash);
+      const job = finisher.jobs && finisher.jobs[key];
+      const clip = finisher.clips && finisher.clips[key];
+
+      p.appendChild(el('h3', '', 'Finisher'));
+      const styleRow = el('div', 'ed-row'); styleRow.appendChild(el('label', '', 'Effect'));
+      const styleSelect = el('select');
+      DS.Finishers.STYLES.forEach((style) => {
+        const opt = el('option', '', style);
+        opt.value = style; opt.selected = finisher.style === style;
+        styleSelect.appendChild(opt);
+      });
+      styleSelect.onchange = () => { finisher.style = styleSelect.value; this.queueSave(); this.build(); };
+      styleRow.appendChild(styleSelect); p.appendChild(styleRow);
+
+      const victimRow = el('div', 'ed-row'); victimRow.appendChild(el('label', '', 'Target'));
+      const victimSelect = el('select');
+      roster.forEach((name) => {
+        const opt = el('option', '', name);
+        opt.value = name; opt.selected = name === this.finisherVictimName;
+        victimSelect.appendChild(opt);
+      });
+      victimSelect.onchange = () => { this.finisherVictimName = victimSelect.value; this.build(); };
+      victimRow.appendChild(victimSelect); p.appendChild(victimRow);
+
+      const btns = el('div', 'ed-btns');
+      const generate = el('button', '', 'Generate finisher');
+      const status = el('div', 'ed-note finisher-status');
+      const setStatus = (text) => { status.textContent = text; this.finisherStatus = text; };
+      generate.onclick = async () => {
+        generate.disabled = true;
+        setStatus('Submitting finisher...');
+        try {
+          const result = await DS.Finishers.generate(this.charName, this.finisherVictimName);
+          setStatus(this._finisherLabel(result.job));
+          if (result.job.status === 'queued' || result.job.status === 'generating') this._pollFinisher(this.charName, result.key, status);
+          else this.build();
+        } catch (error) {
+          setStatus(error && error.message ? error.message : 'Finisher failed.');
+        } finally {
+          generate.disabled = false;
+        }
+      };
+      btns.appendChild(generate);
+      if (job && job.jobId && job.status !== 'ready' && job.status !== 'missing_key' && job.status !== 'failed') {
+        const refresh = el('button', '', 'Refresh');
+        refresh.onclick = async () => {
+          refresh.disabled = true;
+          try {
+            const latest = await DS.Finishers.refresh(this.charName, key);
+            setStatus(this._finisherLabel(latest));
+            if (latest.status === 'ready') this.build();
+          } catch (error) {
+            setStatus(error && error.message ? error.message : 'Refresh failed.');
+          } finally {
+            refresh.disabled = false;
+          }
+        };
+        btns.appendChild(refresh);
+      }
+      p.appendChild(btns);
+
+      if (clip && clip.videoUrl) {
+        setStatus('Ready: ' + finisher.style + ' vs ' + this.finisherVictimName);
+        const video = el('video', 'finisher-preview');
+        video.src = clip.videoUrl; video.controls = true; video.muted = true; video.playsInline = true;
+        p.appendChild(video);
+      } else if (job) {
+        setStatus(this._finisherLabel(job));
+      } else {
+        setStatus('No clip yet for ' + finisher.style + ' vs ' + this.finisherVictimName + '.');
+      }
+      p.appendChild(status);
+    }
+
+    _finisherLabel(job) {
+      if (!job) return 'No finisher job.';
+      if (job.status === 'missing_key') return 'Missing FAL_KEY in backend/.env.';
+      if (job.status === 'queued') return 'Queued with fal.';
+      if (job.status === 'generating') return 'Generating video.';
+      if (job.status === 'ready') return 'Ready.';
+      if (job.status === 'failed') return 'Failed: ' + (job.error || 'generation failed');
+      return job.status || 'Waiting.';
+    }
+
+    async _pollFinisher(attackerId, key, statusEl) {
+      for (let i = 0; i < 45; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2200));
+        try {
+          const job = await DS.Finishers.refresh(attackerId, key);
+          statusEl.textContent = this._finisherLabel(job);
+          if (job.status === 'ready' || job.status === 'failed' || job.status === 'missing_key') {
+            this.build();
+            return;
+          }
+        } catch (error) {
+          statusEl.textContent = error && error.message ? error.message : 'Finisher refresh failed.';
+          return;
+        }
+      }
     }
 
     _buildStage(p) {

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.finishers import reset_finisher_jobs
 from app.orchestrator import AgentOrchestrator
 from app.rooms import rooms
 from app.schemas import VisualObservation, VisualObservationHint
@@ -14,9 +15,10 @@ from app.schemas import VisualObservation, VisualObservationHint
 
 def setup_function() -> None:
     os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("FAL_KEY", None)
     os.environ.pop("MAGICBOARD_VLM_MODEL", None)
-    os.environ.pop("DEEPGRAM_API_KEY", None)
     rooms.reset()
+    reset_finisher_jobs()
 
 
 def projection() -> dict:
@@ -30,6 +32,16 @@ def projection() -> dict:
     }
 
 
+def stage_reference() -> dict:
+    return {
+        "view": {"w": 1920, "h": 1080, "x": 0, "y": 0},
+        "bounds": {"x0": 0, "y0": 0, "x1": 1920, "y1": 1080},
+        "platforms": [{"x": 100, "y": 860, "w": 440, "h": 42}],
+        "portals": [{"id": "portal-a", "x": 320, "y": 520, "r": 44}],
+        "spawns": [{"x": 260, "y": 780}, {"x": 1660, "y": 780}],
+    }
+
+
 def test_health() -> None:
     client = TestClient(app)
 
@@ -39,9 +51,104 @@ def test_health() -> None:
     assert response.json() == {"ok": True, "version": "0.1.0"}
 
 
+def finisher_payload(style: str = "Melt") -> dict:
+    return {
+        "attackerId": "Sprout",
+        "victimId": "Acorn",
+        "victimSkinHash": "skin-abc",
+        "style": style,
+        "imageDataUrl": "data:image/png;base64,iVBORw0KGgo=",
+    }
+
+
+def test_finisher_job_reports_missing_key(monkeypatch) -> None:
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    client = TestClient(app)
+
+    response = client.post("/finishers/jobs", json=finisher_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["jobId"].startswith("finisher-job-")
+    assert body["status"] == "missing_key"
+    assert body["videoUrl"] is None
+    assert body["error"] == "missing FAL_KEY"
+
+
+def test_finisher_job_rejects_invalid_style() -> None:
+    client = TestClient(app)
+
+    response = client.post("/finishers/jobs", json=finisher_payload("Vaporize"))
+
+    assert response.status_code == 422
+
+
+def test_finisher_job_creates_cached_local_record(monkeypatch) -> None:
+    monkeypatch.setenv("FAL_KEY", "test-fal-key")
+
+    async def fake_submit(request):
+        return {"request_id": "fal-123"}
+
+    monkeypatch.setattr("app.finishers._submit_fal_job", fake_submit)
+    client = TestClient(app)
+
+    first = client.post("/finishers/jobs", json=finisher_payload("Explode"))
+    second = client.post("/finishers/jobs", json=finisher_payload("Explode"))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["jobId"] == second.json()["jobId"]
+    assert first.json()["status"] == "queued"
+
+
+def test_finisher_job_poll_transitions_to_ready(monkeypatch) -> None:
+    monkeypatch.setenv("FAL_KEY", "test-fal-key")
+
+    async def fake_submit(request):
+        return {"request_id": "fal-ready"}
+
+    async def fake_status(job):
+        return {"status": "COMPLETED"}
+
+    async def fake_result(job):
+        return {"video": {"url": "https://cdn.example/finisher.mp4"}}
+
+    monkeypatch.setattr("app.finishers._submit_fal_job", fake_submit)
+    monkeypatch.setattr("app.finishers._fal_status", fake_status)
+    monkeypatch.setattr("app.finishers._fal_result", fake_result)
+    client = TestClient(app)
+
+    created = client.post("/finishers/jobs", json=finisher_payload()).json()
+    response = client.get(f"/finishers/jobs/{created['jobId']}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["videoUrl"] == "https://cdn.example/finisher.mp4"
+
+
+def test_finisher_job_poll_transitions_to_failed(monkeypatch) -> None:
+    monkeypatch.setenv("FAL_KEY", "test-fal-key")
+
+    async def fake_submit(request):
+        return {"request_id": "fal-fail"}
+
+    async def fake_status(job):
+        return {"status": "FAILED", "error": {"message": "bad image"}}
+
+    monkeypatch.setattr("app.finishers._submit_fal_job", fake_submit)
+    monkeypatch.setattr("app.finishers._fal_status", fake_status)
+    client = TestClient(app)
+
+    created = client.post("/finishers/jobs", json=finisher_payload()).json()
+    response = client.get(f"/finishers/jobs/{created['jobId']}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["error"] == "bad image"
+
+
 def test_agent_status_reports_stubbed_cold_path_without_required_keys(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
     client = TestClient(app)
 
     response = client.get("/agent/status")
@@ -54,8 +161,7 @@ def test_agent_status_reports_stubbed_cold_path_without_required_keys(monkeypatc
     assert capabilities["deterministic_semantic"]["hotPath"] is False
     assert capabilities["vlm_semantic"]["status"] == "missing_key"
     assert capabilities["vlm_semantic"]["requiredEnv"] == ["OPENAI_API_KEY"]
-    assert capabilities["voice"]["status"] == "missing_key"
-    assert capabilities["voice"]["requiredEnv"] == ["OPENAI_API_KEY", "DEEPGRAM_API_KEY"]
+    assert set(capabilities) == {"deterministic_semantic", "vlm_semantic"}
 
 
 def test_empty_room_capture() -> None:
@@ -71,8 +177,6 @@ def test_empty_room_capture() -> None:
     assert body["projection"] is None
     assert body["semanticDraft"] is None
     assert body["visualObservation"] is None
-    assert body["voiceSessions"] == []
-    assert body["voiceEvents"] == []
     assert body["agentTurns"] == []
     assert body["proposals"] == []
     assert body["permissionRequests"] == []
@@ -97,10 +201,16 @@ def test_current_selection_starts_empty() -> None:
 
 def test_current_selection_tracks_desktop_preview_room() -> None:
     client = TestClient(app)
+    reference = stage_reference()
 
     response = client.post(
         "/selection/current",
-        json={"roomId": "world-demo", "worldId": "world-demo", "worldName": "Demo World"},
+        json={
+            "roomId": "world-demo",
+            "worldId": "world-demo",
+            "worldName": "Demo World",
+            "stageReference": reference,
+        },
     )
 
     assert response.status_code == 200
@@ -108,9 +218,14 @@ def test_current_selection_tracks_desktop_preview_room() -> None:
     assert body["roomId"] == "world-demo"
     assert body["worldId"] == "world-demo"
     assert body["worldName"] == "Demo World"
+    assert body["stageReference"] == reference
+    assert body["stageReferenceVersion"] == 1
     assert body["selectedAt"]
     assert client.get("/selection/current").json() == body
-    assert client.get("/rooms/world-demo/capture").json()["roomId"] == "world-demo"
+    room = client.get("/rooms/world-demo/capture").json()
+    assert room["roomId"] == "world-demo"
+    assert room["stageReference"] == reference
+    assert room["stageReferenceVersion"] == 1
 
 
 def test_selection_websocket_receives_desktop_selection_updates() -> None:
@@ -191,6 +306,8 @@ def test_websocket_capture_updates_room_and_http_capture() -> None:
         assert hello["type"] == "hello"
         assert hello["projection"] is None
         assert hello["visualObservation"] is None
+        assert hello["stageReference"] is None
+        assert hello["stageReferenceVersion"] == 0
         websocket.send_json(
             {
                 "type": "canvas_capture",
@@ -208,6 +325,8 @@ def test_websocket_capture_updates_room_and_http_capture() -> None:
     assert update["projection"] == projected
     assert update["semanticDraft"]["captureVersion"] == 1
     assert update["visualObservation"]["status"] == "missing_key"
+    assert update["stageReference"] is None
+    assert update["stageReferenceVersion"] == 0
     assert update["sourceClientId"] == "ipad"
 
     response = client.get("/rooms/demo/capture")
@@ -232,6 +351,11 @@ def test_websocket_capture_updates_room_and_http_capture() -> None:
 def test_new_connection_receives_latest_projection_in_hello() -> None:
     client = TestClient(app)
     projected = projection()
+    reference = stage_reference()
+    client.post(
+        "/selection/current",
+        json={"roomId": "demo", "worldId": "world-demo", "worldName": "Demo World", "stageReference": reference},
+    )
     projected["shapes"].append(
         {"id": "shape-platform", "sourceId": "shape-platform", "kind": "rectangle", "x": 100, "y": 820, "w": 480, "h": 48}
     )
@@ -246,6 +370,8 @@ def test_new_connection_receives_latest_projection_in_hello() -> None:
         assert hello["type"] == "hello"
         assert hello["version"] == 1
         assert hello["projection"] == projected
+        assert hello["stageReference"] == reference
+        assert hello["stageReferenceVersion"] == 1
         assert hello["semanticDraft"]["candidates"][0]["question"]["prompt"] == "What should this platform do?"
         assert hello["visualObservation"]["status"] == "missing_key"
 
@@ -638,7 +764,8 @@ def test_mocked_vlm_response_stores_and_broadcasts_observation(monkeypatch) -> N
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("MAGICBOARD_VLM_MODEL", "gpt-test")
 
-    def fake_observation(*, projection: dict) -> dict:
+    def fake_observation(*, projection: dict, candidates: list[dict]) -> dict:
+        assert [candidate["sourceIds"] for candidate in candidates] == [["stroke-1"]]
         return {
             "description": "A single horizontal platform is drawn near the bottom.",
             "hints": [
@@ -654,10 +781,15 @@ def test_mocked_vlm_response_stores_and_broadcasts_observation(monkeypatch) -> N
 
     monkeypatch.setattr("app.agent_runtime._request_openai_visual_observation", fake_observation)
     client = TestClient(app)
+    projected = projection()
+    projected["strokes"] = []
+    projected["shapes"] = [
+        {"id": "stroke-1", "sourceId": "stroke-1", "kind": "rectangle", "x": 120, "y": 780, "w": 360, "h": 44}
+    ]
 
     with client.websocket_connect("/ws/rooms/vlm-ready") as websocket:
         websocket.receive_json()
-        websocket.send_json({"type": "canvas_capture", "capture": {"ok": True}, "projection": projection()})
+        websocket.send_json({"type": "canvas_capture", "capture": {"ok": True}, "projection": projected})
         projection_update = websocket.receive_json()
         visual_update = websocket.receive_json()
 
@@ -674,7 +806,8 @@ def test_coalesced_vlm_jobs_only_latest_capture_becomes_current(monkeypatch) -> 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     calls = {"count": 0}
 
-    def fake_observation(*, projection: dict) -> dict:
+    def fake_observation(*, projection: dict, candidates: list[dict]) -> dict:
+        assert candidates
         calls["count"] += 1
         if calls["count"] == 1:
             time.sleep(0.05)
@@ -683,9 +816,15 @@ def test_coalesced_vlm_jobs_only_latest_capture_becomes_current(monkeypatch) -> 
     monkeypatch.setattr("app.agent_runtime._request_openai_visual_observation", fake_observation)
     client = TestClient(app)
     first = projection()
+    first["strokes"] = []
+    first["shapes"] = [
+        {"id": "shape-1", "sourceId": "shape-1", "kind": "rectangle", "x": 120, "y": 780, "w": 360, "h": 44}
+    ]
     second = projection()
-    second["strokes"][0]["id"] = "stroke-2"
-    second["strokes"][0]["sourceId"] = "stroke-2"
+    second["strokes"] = []
+    second["shapes"] = [
+        {"id": "shape-2", "sourceId": "shape-2", "kind": "rectangle", "x": 160, "y": 720, "w": 420, "h": 44}
+    ]
 
     with client.websocket_connect("/ws/rooms/coalesce") as websocket:
         websocket.receive_json()
@@ -757,71 +896,6 @@ def test_agent_job_rejects_stale_capture_version_before_cold_path_work() -> None
     assert body["captureVersion"] == 0
     assert body["currentCaptureVersion"] == 1
     assert body["requiredEnv"] == []
-
-
-def test_voice_agent_job_reports_configured_endpoint_path() -> None:
-    client = TestClient(app)
-
-    response = client.post(
-        "/rooms/voice-agent/agent/jobs",
-        json={
-            "type": "agent_semantic_review",
-            "idempotencyKey": "voice-job",
-            "captureVersion": 0,
-            "modality": "voice",
-        },
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "stubbed_missing_key"
-    assert body["requiredEnv"] == ["OPENAI_API_KEY", "DEEPGRAM_API_KEY"]
-    assert "voice requires" in body["message"].lower()
-
-
-def test_voice_session_start_missing_keys_returns_typed_error(monkeypatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
-    client = TestClient(app)
-
-    response = client.post("/rooms/voice-missing/voice/sessions", json={"clientId": "ipad"})
-
-    assert response.status_code == 503
-    detail = response.json()["detail"]
-    assert detail["code"] == "missing_key"
-    assert set(detail["details"]["missing"]) == {"OPENAI_API_KEY", "DEEPGRAM_API_KEY"}
-
-
-def test_voice_session_lifecycle_and_events(monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
-    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram")
-    client = TestClient(app)
-
-    response = client.post("/rooms/voice-room/voice/sessions", json={"clientId": "desktop", "worldId": "world-1"})
-
-    assert response.status_code == 200
-    session = response.json()
-    assert session["status"] == "starting"
-    assert session["roomId"] == "voice-room"
-    assert session["worldId"] == "world-1"
-    assert client.get(f"/rooms/voice-room/voice/sessions/{session['sessionId']}").json()["sessionId"] == session["sessionId"]
-    assert client.get("/rooms/voice-room/voice/events").json() == {"roomId": "voice-room", "events": []}
-
-    ended = client.delete(f"/rooms/voice-room/voice/sessions/{session['sessionId']}")
-    assert ended.status_code == 200
-    assert ended.json()["status"] == "ended"
-
-
-def test_starting_second_voice_session_requires_permission(monkeypatch) -> None:
-    monkeypatch.setenv("OPENAI_API_KEY", "test-openai")
-    monkeypatch.setenv("DEEPGRAM_API_KEY", "test-deepgram")
-    client = TestClient(app)
-    assert client.post("/rooms/one-voice/voice/sessions", json={"clientId": "a"}).status_code == 200
-
-    response = client.post("/rooms/one-voice/voice/sessions", json={"clientId": "b"})
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "permission_required"
 
 
 def test_agent_tool_rejects_stale_version_refs() -> None:

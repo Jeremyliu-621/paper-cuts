@@ -105,6 +105,16 @@ body{
 .ed-btns button:hover{transform:rotate(-.7deg);}
 .ed-note{font-size:15px;color:var(--ink-soft);margin:6px 0;line-height:1.25;}
 .ed-preview{border:2px dashed var(--ink-soft);border-radius:10px;margin:8px 0;display:block;background:var(--paper);width:100%;}
+.finisher-status{border-top:2px dashed rgba(107,98,89,.5);padding-top:6px;}
+.finisher-preview{
+  display:block;
+  width:100%;
+  aspect-ratio:16/9;
+  margin:8px 0;
+  border:2px solid var(--ink);
+  border-radius:8px;
+  background:var(--paper-2);
+}
 
 /* help overlay */
 #help-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
@@ -214,60 +224,6 @@ body{
   opacity:.72;
   transform:none;
 }
-.level-agent-panel{
-  width:min(1180px,calc(100vw - 24px));
-  margin:8px auto 0;
-  display:grid;
-  gap:8px;
-  border:2px solid rgba(47,42,38,.42);
-  border-radius:8px;
-  background:rgba(255,250,240,.92);
-  box-shadow:3px 4px 0 rgba(47,42,38,.1);
-  padding:9px 10px;
-  pointer-events:auto;
-}
-.level-agent-head{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  min-width:0;
-}
-.level-agent-head div{
-  display:grid;
-  min-width:0;
-  gap:2px;
-}
-.level-agent-head strong{
-  font-size:18px;
-  line-height:1.05;
-}
-.level-agent-head span,
-.level-agent-grid span{
-  color:var(--ink-soft);
-  font-size:13px;
-  line-height:1.1;
-}
-.level-agent-grid{
-  display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  gap:8px;
-}
-.level-agent-grid div{
-  min-width:0;
-  border:1px dashed rgba(107,98,89,.55);
-  border-radius:8px;
-  background:rgba(246,241,231,.7);
-  padding:6px 8px;
-}
-.level-agent-grid p{
-  min-height:34px;
-  margin:2px 0 0;
-  color:var(--ink);
-  font-size:15px;
-  line-height:1.15;
-  overflow-wrap:anywhere;
-}
-
 /* Game Library */
 .library-page{
   width:min(1120px,96vw);
@@ -588,12 +544,6 @@ body{
   }
   .level-preview-button{
     flex:1 1 0;
-  }
-  .level-agent-panel{
-    width:calc(100vw - 16px);
-  }
-  .level-agent-grid{
-    grid-template-columns:1fr;
   }
 }
 

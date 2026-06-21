@@ -395,6 +395,11 @@
     }
 
     _ko(world) {
+      if (world.game && world.game.tryStartFinisher && world.game.tryStartFinisher(this, world)) return;
+      this._completeKO(world);
+    }
+
+    _completeKO(world) {
       // anchor the blast AT the blast border the fighter crossed (clamp to the blast
       // bounds, not the stage edge) so the flame originates from the boundary, then jets
       // OUTWARD along the launch — the fighter blazing off through the border.

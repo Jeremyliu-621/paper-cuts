@@ -8,6 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 BACKEND_VERSION = "0.1.0"
 
+FinisherStyle = Literal["Melt", "Explode", "Dissolve", "Squish", "Tear", "Crumble", "Cake-ify"]
+FinisherJobStatus = Literal["queued", "generating", "ready", "failed", "missing_key"]
+
 
 AgentErrorCode = Literal[
     "missing_key",
@@ -238,8 +241,6 @@ class RoomCaptureResponse(BaseModel):
     projection: dict[str, Any] | None
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
     visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
-    voice_sessions: list["VoiceSession"] = Field(default_factory=list, alias="voiceSessions")
-    voice_events: list["VoiceTranscriptEvent"] = Field(default_factory=list, alias="voiceEvents")
     agent_turns: list["AgentTurn"] = Field(default_factory=list, alias="agentTurns")
     proposals: list["LevelEditProposal"] = Field(default_factory=list)
     permission_requests: list["PermissionRequest"] = Field(default_factory=list, alias="permissionRequests")
@@ -258,6 +259,25 @@ class RoomSelectionRequest(BaseModel):
     world_name: str | None = Field(default=None, alias="worldName")
     stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
     stage_reference_version: int | None = Field(default=None, alias="stageReferenceVersion")
+
+
+class FinisherJobRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    attacker_id: str = Field(alias="attackerId")
+    victim_id: str = Field(alias="victimId")
+    victim_skin_hash: str = Field(alias="victimSkinHash")
+    style: FinisherStyle = "Melt"
+    image_data_url: str = Field(alias="imageDataUrl")
+
+
+class FinisherJobResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    job_id: str = Field(alias="jobId")
+    status: FinisherJobStatus
+    video_url: str | None = Field(default=None, alias="videoUrl")
+    error: str | None = None
 
 
 class RoomSelectionResponse(BaseModel):
@@ -320,11 +340,11 @@ class HelloMessage(BaseModel):
     projection: dict[str, Any] | None = None
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
     visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
-    voice_sessions: list["VoiceSession"] = Field(default_factory=list, alias="voiceSessions")
-    voice_events: list["VoiceTranscriptEvent"] = Field(default_factory=list, alias="voiceEvents")
     agent_turns: list["AgentTurn"] = Field(default_factory=list, alias="agentTurns")
     proposals: list["LevelEditProposal"] = Field(default_factory=list)
     permission_requests: list["PermissionRequest"] = Field(default_factory=list, alias="permissionRequests")
+    stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
+    stage_reference_version: int = Field(default=0, alias="stageReferenceVersion")
 
 
 class ProjectionUpdatedMessage(BaseModel):
@@ -337,9 +357,10 @@ class ProjectionUpdatedMessage(BaseModel):
     projection: dict[str, Any]
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
     visual_observation: VisualObservation | None = Field(default=None, alias="visualObservation")
-    voice_sessions: list["VoiceSession"] = Field(default_factory=list, alias="voiceSessions")
     proposals: list["LevelEditProposal"] = Field(default_factory=list)
     permission_requests: list["PermissionRequest"] = Field(default_factory=list, alias="permissionRequests")
+    stage_reference: dict[str, Any] | None = Field(default=None, alias="stageReference")
+    stage_reference_version: int = Field(default=0, alias="stageReferenceVersion")
     source_client_id: str | None = Field(default=None, alias="sourceClientId")
 
 
@@ -367,59 +388,6 @@ class VisualObservationUpdatedMessage(BaseModel):
     version: int
     visual_observation: VisualObservation = Field(alias="visualObservation")
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
-
-
-class VoiceSession(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    session_id: str = Field(alias="sessionId")
-    room_id: str = Field(alias="roomId")
-    world_id: str | None = Field(default=None, alias="worldId")
-    status: Literal[
-        "starting",
-        "waiting_for_permission",
-        "listening",
-        "thinking",
-        "running_tool",
-        "waiting_for_job",
-        "speaking",
-        "error",
-        "ended",
-    ] = "starting"
-    created_at: datetime = Field(alias="createdAt")
-    updated_at: datetime = Field(alias="updatedAt")
-    ended_at: datetime | None = Field(default=None, alias="endedAt")
-    capture_version: int = Field(default=0, alias="captureVersion")
-    semantic_draft_version: int = Field(default=0, alias="semanticDraftVersion")
-    stage_reference_version: int = Field(default=0, alias="stageReferenceVersion")
-    client_id: str | None = Field(default=None, alias="clientId")
-    permissions: list[str] = Field(default_factory=list)
-    error: AgentError | None = None
-
-
-class VoiceSessionCreateRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    client_id: str | None = Field(default=None, alias="clientId")
-    world_id: str | None = Field(default=None, alias="worldId")
-    end_other_active: bool = Field(default=False, alias="endOtherActive")
-
-
-class VoiceTranscriptEvent(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    event_id: str = Field(alias="eventId")
-    session_id: str = Field(alias="sessionId")
-    room_id: str = Field(alias="roomId")
-    type: Literal["partial", "final", "assistant_text", "assistant_audio", "error"]
-    transcript: str = ""
-    confidence: float | None = None
-    audio_base64: str | None = Field(default=None, alias="audioBase64")
-    mime_type: str | None = Field(default=None, alias="mimeType")
-    provider: str | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    error: AgentError | None = None
-    created_at: datetime = Field(alias="createdAt")
 
 
 class AgentToolCall(BaseModel):
@@ -482,7 +450,6 @@ class PermissionRequest(BaseModel):
         "replace_generated",
         "remove_generated",
         "delete_manual_content",
-        "end_other_voice_session",
     ]
     arguments: dict[str, Any] = Field(default_factory=dict)
     risk_summary: str = Field(alias="riskSummary")
@@ -500,23 +467,10 @@ class ProposalResolutionRequest(BaseModel):
     approved: bool
 
 
-class VoiceRoomStateUpdatedMessage(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    type: Literal["voice_room_state_updated"] = "voice_room_state_updated"
-    room_id: str = Field(alias="roomId")
-    version: int
-    voice_sessions: list[VoiceSession] = Field(default_factory=list, alias="voiceSessions")
-    voice_events: list[VoiceTranscriptEvent] = Field(default_factory=list, alias="voiceEvents")
-    agent_turns: list[AgentTurn] = Field(default_factory=list, alias="agentTurns")
-    proposals: list[LevelEditProposal] = Field(default_factory=list)
-    permission_requests: list[PermissionRequest] = Field(default_factory=list, alias="permissionRequests")
-
-
 class AgentCapabilityStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    id: Literal["deterministic_semantic", "vlm_semantic", "voice"]
+    id: Literal["deterministic_semantic", "vlm_semantic"]
     status: Literal["enabled", "stubbed_ready", "missing_key", "deferred"]
     hot_path: bool = Field(alias="hotPath")
     required_env: list[str] = Field(default_factory=list, alias="requiredEnv")
@@ -538,7 +492,7 @@ class AgentJobRequest(BaseModel):
     idempotency_key: str = Field(alias="idempotencyKey")
     capture_version: int = Field(alias="captureVersion")
     world_id: str | None = Field(default=None, alias="worldId")
-    modality: Literal["vlm", "llm", "voice"] = "vlm"
+    modality: Literal["vlm", "llm"] = "vlm"
     prompt: str | None = None
     client_id: str | None = Field(default=None, alias="clientId")
 
@@ -553,7 +507,7 @@ class AgentJobResponse(BaseModel):
     idempotency_key: str = Field(alias="idempotencyKey")
     capture_version: int = Field(alias="captureVersion")
     current_capture_version: int = Field(alias="currentCaptureVersion")
-    modality: Literal["vlm", "llm", "voice"]
+    modality: Literal["vlm", "llm"]
     status: Literal["stale", "stubbed_missing_key", "stubbed_ready", "unsupported"]
     required_env: list[str] = Field(default_factory=list, alias="requiredEnv")
     message: str

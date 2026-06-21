@@ -228,12 +228,12 @@
   function drawClientUrl(world) {
     const params = new URLSearchParams(global.location.search);
     const base = params.get('drawClient') || params.get('draw') || localServiceUrl(5173);
-    const backend = params.get('backend') || localServiceUrl(8000).replace(/\/$/, '');
     let url;
     try { url = new URL(base, global.location.href); }
     catch (_error) { url = new URL('http://localhost:5173/'); }
+    const backend = params.get('drawBackend') || url.origin + '/';
     url.searchParams.set('room', world.roomId || world.id);
-    url.searchParams.set('backend', backend);
+    url.searchParams.set('backend', backend.replace(/\/$/, ''));
     url.searchParams.set('world', world.id);
     return url.toString();
   }

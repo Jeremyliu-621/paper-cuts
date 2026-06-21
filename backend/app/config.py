@@ -19,4 +19,4 @@ def env(name: str, default: str | None = None) -> str | None:
 
 
 def required_provider_keys() -> list[str]:
-    return ["OPENAI_API_KEY", "DEEPGRAM_API_KEY"]
+    return ["OPENAI_API_KEY"]

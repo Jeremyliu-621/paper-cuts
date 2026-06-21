@@ -38,11 +38,7 @@ const COLOR_TO_HEX = {
   pink: '#d46aa4',
 }
 
-function getBackendUrl() {
-  const params = new URLSearchParams(window.location.search)
-  const configuredUrl = params.get('backend') || import.meta.env.VITE_BACKEND_URL
-  if (configuredUrl) return configuredUrl
-
+function inferredBackendUrlFromPage() {
   const url = new URL(window.location.href)
   url.port = DEFAULT_BACKEND_PORT
   url.pathname = '/'
@@ -51,12 +47,73 @@ function getBackendUrl() {
   return url.toString()
 }
 
-function normalizeBackendUrl(rawUrl) {
+function isLocalHost(hostname) {
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1'
+    || hostname === '[::1]'
+}
+
+function shouldUseConfiguredBackend(configuredUrl) {
+  if (!configuredUrl) return false
+  const pageHostIsLocal = isLocalHost(window.location.hostname)
+  if (pageHostIsLocal) return true
+
   try {
-    return new URL(rawUrl)
+    return !isLocalHost(new URL(configuredUrl).hostname)
   } catch (_error) {
-    return new URL(`http://localhost:${DEFAULT_BACKEND_PORT}`)
+    return false
   }
+}
+
+function getBackendUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const urlBackend = params.get('backend')
+  if (urlBackend) return urlBackend
+
+  const configuredUrl = import.meta.env.VITE_BACKEND_URL
+  if (shouldUseConfiguredBackend(configuredUrl)) return configuredUrl
+
+  return inferredBackendUrlFromPage()
+}
+
+function normalizeBackendUrl(rawUrl) {
+  const candidate = `${rawUrl || ''}`.trim()
+  try {
+    return new URL(candidate)
+  } catch (_error) {
+    try {
+      return new URL(`http://${candidate}`)
+    } catch (_fallbackError) {
+      return new URL(`http://localhost:${DEFAULT_BACKEND_PORT}`)
+    }
+  }
+}
+
+function backendUrlInputValue(backendUrl) {
+  return backendUrl.toString().replace(/\/$/, '')
+}
+
+function normalizeRoomCode(rawRoomCode) {
+  return rawRoomCode
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+function healthUrlForBackend(backendUrl) {
+  const url = new URL(backendUrl)
+  url.pathname = '/health'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function backendUnreachableMessage(backendUrl) {
+  return `Could not reach ${backendUrl}. Check the Mac IP, Wi-Fi, backend server, or firewall.`
 }
 
 function websocketUrlForRoom(backendUrl, roomId) {
@@ -92,35 +149,18 @@ function visualObservationUrlForRoom(backendUrl, roomId) {
   return url.toString()
 }
 
-function voiceSessionsUrlForRoom(backendUrl, roomId) {
-  const url = new URL(backendUrl)
-  url.pathname = `/rooms/${encodeURIComponent(roomId)}/voice/sessions`
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
-function voiceSessionUrlForRoom(backendUrl, roomId, sessionId) {
-  const url = new URL(backendUrl)
-  url.pathname = `/rooms/${encodeURIComponent(roomId)}/voice/sessions/${encodeURIComponent(sessionId)}`
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
-function voiceWsUrlForRoom(backendUrl, roomId, sessionId) {
-  const url = new URL(backendUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = `/ws/rooms/${encodeURIComponent(roomId)}/voice/${encodeURIComponent(sessionId)}`
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
 function selectionWsUrlForBackend(backendUrl) {
   const url = new URL(backendUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   url.pathname = '/ws/selection'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function selectionCurrentUrlForBackend(backendUrl) {
+  const url = new URL(backendUrl)
+  url.pathname = '/selection/current'
   url.search = ''
   url.hash = ''
   return url.toString()
@@ -135,6 +175,19 @@ function roomSelectionFromUrl() {
     worldId: params.get('world') || roomId,
     worldName: params.get('worldName') || null,
   }
+}
+
+function hasStageReference(stageReference) {
+  return !!(
+    stageReference
+    && (
+      stageReference.view
+      || stageReference.bounds
+      || stageReference.platforms?.length
+      || stageReference.portals?.length
+      || stageReference.spawns?.length
+    )
+  )
 }
 
 function createClientId() {
@@ -263,6 +316,27 @@ function visualObservationLabel(observation) {
   return 'error'
 }
 
+function syncStatusLabel(status) {
+  const labels = {
+    idle: 'joining',
+    waiting: 'joining',
+    loading: 'joining',
+    connecting: 'joining',
+    connected: 'connected',
+    disconnected: 'room disconnected',
+    error: 'backend unreachable',
+  }
+  return labels[status] || status
+}
+
+function syncStatusClassName(status) {
+  if (status === 'connected') return 'connected'
+  if (status === 'loading' || status === 'connecting' || status === 'idle' || status === 'waiting') return 'connecting'
+  if (status === 'disconnected') return 'disconnected'
+  if (status === 'error') return 'error'
+  return status
+}
+
 function choiceLabel(choice) {
   const labels = {
     yes_platform: 'Solid',
@@ -277,6 +351,18 @@ function choiceLabel(choice) {
     no_ignore: 'Ignore',
   }
   return labels[choice?.id] || choice?.label || 'Choose'
+}
+
+function compactChoices(choices) {
+  const wanted = ['normal', 'spikes', 'cannon', 'portal_pair', 'portal_endpoint', 'decor', 'no_ignore']
+  const seen = new Set()
+  return wanted
+    .map((choiceId) => choices.find((choice) => choice.id === choiceId))
+    .filter((choice) => {
+      if (!choice || seen.has(choice.role)) return false
+      seen.add(choice.role)
+      return true
+    })
 }
 
 function ensureStageFrame(editor) {
@@ -439,6 +525,7 @@ function SemanticPanel({
   onSelectCandidate,
   onAnswer,
   error,
+  visualObservation,
 }) {
   const candidates = semanticDraft?.candidates || []
   const pending = candidates.filter((candidate) => candidate.status === 'needs_answer')
@@ -446,11 +533,12 @@ function SemanticPanel({
   const selected = current?.status === 'needs_answer' ? current : pending[0] || current || candidates[0]
   if (!candidates.length) return null
   const question = selected?.question
-  const choices = question?.choices || []
+  const choices = compactChoices(question?.choices || [])
   const pendingCount = pending.length
+  const needsManualFallback = visualObservation?.status === 'error' || visualObservation?.status === 'missing_key'
 
   return (
-    <section className="semantic-panel" aria-label="Agent asks">
+    <section className="semantic-panel" aria-label="Manual doodle choices">
       <div className="semantic-candidate-strip">
         {candidates.map((candidate, index) => (
           <button
@@ -467,11 +555,16 @@ function SemanticPanel({
         <div className="semantic-question">
           <div className="semantic-question-head">
             <div>
-              <span>{pendingCount ? `Agent asks · ${pendingCount} left` : 'Agent state'}</span>
-              <strong>{selected.status === 'needs_answer' ? question?.prompt || 'What should this platform do?' : selected.answer?.choiceId || selected.status}</strong>
+              <span>{pendingCount ? `Choose type · ${pendingCount} left` : 'Doodle type'}</span>
+              <strong>{selected.status === 'needs_answer' ? question?.prompt || 'What should this doodle become?' : selected.answer?.choiceId || selected.status}</strong>
             </div>
             <span>{selected.extractor}</span>
           </div>
+          {needsManualFallback && selected.status === 'needs_answer' ? (
+            <p className="semantic-answer-state">
+              Vision could not decide. Pick a type below.
+            </p>
+          ) : null}
           {selected.status === 'needs_answer' ? (
             <div className="semantic-choice-grid">
               {choices.map((choice) => (
@@ -519,38 +612,118 @@ function VisualObservationPanel({ observation }) {
   )
 }
 
-function VoicePanel({
-  voiceStatus,
-  voiceEvents,
-  agentTurns,
-  proposals,
-  permissionRequests,
-  isRecording,
-  onToggleMic,
+function DesktopSelectionPanel({ selection, currentRoomId, onSwitch }) {
+  if (!selection?.roomId || selection.roomId === currentRoomId) return null
+  return (
+    <section className="desktop-selection-panel" aria-label="Desktop selected level">
+      <div>
+        <strong>Desktop selected</strong>
+        <p>{selection.worldName || selection.worldId || selection.roomId}</p>
+      </div>
+      <button type="button" onClick={() => onSwitch(selection)}>
+        Open level
+      </button>
+    </section>
+  )
+}
+
+function JoinRoomScreen({
+  backendUrl,
+  selectionStatus,
+  error,
+  onJoin,
 }) {
-  const latestTranscript = [...voiceEvents].reverse().find((event) => event.type === 'final' || event.type === 'partial')
-  const assistant = [...voiceEvents].reverse().find((event) => event.type === 'assistant_text')
-  const proposal = [...proposals].reverse().find((item) => item.approvalState === 'pending_approval' || item.approvalState === 'approved') || proposals[proposals.length - 1]
-  const permission = permissionRequests.find((item) => item.status === 'pending') || permissionRequests[permissionRequests.length - 1]
-  const turn = agentTurns[agentTurns.length - 1]
+  const [roomCode, setRoomCode] = useState('')
+  const [backendInput, setBackendInput] = useState(() => backendUrlInputValue(backendUrl))
+  const [joinStatus, setJoinStatus] = useState('idle')
+  const [joinError, setJoinError] = useState('')
+  const normalizedRoom = normalizeRoomCode(roomCode)
+  const displayError = joinError || error
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setJoinError('')
+
+    if (!normalizedRoom) {
+      setJoinError('Enter a room code.')
+      return
+    }
+
+    const normalizedBackendUrl = normalizeBackendUrl(backendInput)
+    const backendValue = backendUrlInputValue(normalizedBackendUrl)
+    setBackendInput(backendValue)
+    setJoinStatus('joining')
+
+    try {
+      const response = await fetch(healthUrlForBackend(normalizedBackendUrl), { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Health check failed: ${response.status}`)
+      onJoin(normalizedRoom, backendValue)
+    } catch (_requestError) {
+      setJoinStatus('backend unreachable')
+      setJoinError(backendUnreachableMessage(backendValue))
+    }
+  }
 
   return (
-    <section className="voice-panel" aria-label="Voice agent">
-      <button className={`voice-mic ${isRecording ? 'recording' : ''}`} type="button" onClick={onToggleMic}>
-        {isRecording ? 'Stop' : 'Mic'}
-      </button>
-      <div className="voice-sheet">
-        <div className="voice-row">
-          <strong>{voiceStatus || 'voice idle'}</strong>
-          <span>{turn ? turn.status : 'no job'}</span>
+    <main className="draw-app draw-app-waiting">
+      <section className="join-panel" aria-label="Join drawing room">
+        <div className="join-panel-head">
+          <p className="join-kicker">Magic Board</p>
+          <h1>Open a level on the laptop</h1>
         </div>
-        <p>{latestTranscript?.transcript || assistant?.transcript || 'Transcript will appear here.'}</p>
-        <div className="voice-chips">
-          <span>{proposal ? `proposal · ${proposal.approvalState}` : 'no proposal'}</span>
-          <span>{permission ? permission.status : 'no permission'}</span>
+        <form className="join-form" onSubmit={handleSubmit}>
+          <p className="join-hint">
+            The iPad will attach automatically when the laptop opens Edit Level.
+          </p>
+          <label className="join-field">
+            <span>Room code</span>
+            <input
+              type="text"
+              value={roomCode}
+              onChange={(event) => setRoomCode(event.target.value)}
+              inputMode="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              placeholder="demo"
+              aria-describedby="room-code-hint"
+            />
+          </label>
+          <p id="room-code-hint" className="join-hint">
+            Manual room entry is available for testing.
+          </p>
+          <details className="join-advanced">
+            <summary>Connection</summary>
+            <label className="join-field">
+              <span>Backend URL</span>
+              <input
+                type="url"
+                value={backendInput}
+                onChange={(event) => setBackendInput(event.target.value)}
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+            </label>
+          </details>
+          <button className="join-button" type="submit" disabled={joinStatus === 'joining'}>
+            {joinStatus === 'joining' ? 'Joining...' : 'Join'}
+          </button>
+        </form>
+        <div className="join-details" aria-label="Connection details">
+          <dl>
+            <div>
+              <dt>Status</dt>
+              <dd>{joinStatus === 'idle' ? selectionStatus : joinStatus}</dd>
+            </div>
+            <div>
+              <dt>Backend</dt>
+              <dd>{backendInput}</dd>
+            </div>
+          </dl>
+          {displayError ? <p>{displayError}</p> : null}
         </div>
-      </div>
-    </section>
+      </section>
+    </main>
   )
 }
 
@@ -566,12 +739,15 @@ export default function App() {
     () => selectionWsUrlForBackend(backendUrl),
     [backendUrl],
   )
+  const selectionCurrentUrl = useMemo(
+    () => selectionCurrentUrlForBackend(backendUrl),
+    [backendUrl],
+  )
   const urls = useMemo(
     () => (roomId ? {
       capture: captureUrlForRoom(backendUrl, roomId),
       clarifications: clarificationUrlForRoom(backendUrl, roomId),
       visualObservation: visualObservationUrlForRoom(backendUrl, roomId),
-      voiceSessions: voiceSessionsUrlForRoom(backendUrl, roomId),
       websocket: websocketUrlForRoom(backendUrl, roomId),
     } : null),
     [backendUrl, roomId],
@@ -579,9 +755,6 @@ export default function App() {
 
   const editorRef = useRef(null)
   const socketRef = useRef(null)
-  const voiceSocketRef = useRef(null)
-  const mediaRecorderRef = useRef(null)
-  const micStreamRef = useRef(null)
   const reconnectTimerRef = useRef(null)
   const sendTimerRef = useRef(null)
   const cleanupStoreListenerRef = useRef(null)
@@ -603,15 +776,9 @@ export default function App() {
   const [visualObservation, setVisualObservation] = useState(null)
   const [selectedCandidateId, setSelectedCandidateId] = useState(null)
   const [semanticError, setSemanticError] = useState('')
-  const [voiceSession, setVoiceSession] = useState(null)
-  const [voiceEvents, setVoiceEvents] = useState([])
-  const [agentTurns, setAgentTurns] = useState([])
-  const [proposals, setProposals] = useState([])
-  const [permissionRequests, setPermissionRequests] = useState([])
-  const [voiceStatus, setVoiceStatus] = useState('voice idle')
-  const [isRecording, setIsRecording] = useState(false)
   const [error, setError] = useState('')
   const [selectionStatus, setSelectionStatus] = useState(explicitRoom ? 'url room' : 'waiting')
+  const [desktopSelection, setDesktopSelection] = useState(null)
   const tldrawComponents = useMemo(
     () => ({
       OnTheCanvas: () => (
@@ -623,6 +790,46 @@ export default function App() {
     }),
     [semanticDraft, selectedCandidateId, selectedRoom?.stageReference],
   )
+
+  const handleJoinRoom = useCallback((nextRoomId, nextBackendUrl) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('room', nextRoomId)
+    params.set('backend', nextBackendUrl)
+    window.location.assign(`/?${params.toString()}`)
+  }, [])
+
+  const handleSwitchToSelection = useCallback((selection) => {
+    if (!selection?.roomId) return
+    const params = new URLSearchParams(window.location.search)
+    params.set('room', selection.roomId)
+    params.set('backend', backendUrlInputValue(backendUrl))
+    params.set('world', selection.worldId || selection.roomId)
+    if (selection.worldName) params.set('worldName', selection.worldName)
+    else params.delete('worldName')
+    window.location.assign(`/?${params.toString()}`)
+  }, [backendUrl])
+
+  const mergeSelectedRoomContext = useCallback((room) => {
+    if (!room?.roomId || room.roomId !== roomId) return
+    setSelectedRoom((current) => {
+      if (!current || current.roomId !== room.roomId) return current
+      const nextStageReference = hasStageReference(room.stageReference)
+        ? room.stageReference
+        : current.stageReference
+      const nextStageReferenceVersion = room.stageReferenceVersion ?? current.stageReferenceVersion ?? 0
+      if (
+        current.stageReference === nextStageReference
+        && current.stageReferenceVersion === nextStageReferenceVersion
+      ) {
+        return current
+      }
+      return {
+        ...current,
+        stageReference: nextStageReference,
+        stageReferenceVersion: nextStageReferenceVersion,
+      }
+    })
+  }, [roomId])
 
   useEffect(() => {
     const candidates = semanticDraft?.candidates || []
@@ -639,18 +846,41 @@ export default function App() {
     let cancelled = false
     let socket = null
     let reconnectTimer = 0
+    let pollTimer = 0
+    let inFlightPoll = null
 
     const applySelection = (selection, source) => {
       if (cancelled) return
       if (explicitRoom) {
         setSelectionStatus(source ? `url room · ${source}` : 'url room')
         setError('')
-        setSelectedRoom(explicitRoom)
+        if (selection.roomId && selection.roomId !== explicitRoom.roomId) {
+          setDesktopSelection({
+            roomId: selection.roomId,
+            worldId: selection.worldId || selection.roomId,
+            worldName: selection.worldName || null,
+            stageReference: selection.stageReference || EMPTY_STAGE_REFERENCE,
+            stageReferenceVersion: selection.stageReferenceVersion || 0,
+          })
+          setSelectedRoom(explicitRoom)
+          return
+        }
+        setDesktopSelection(null)
+        setSelectedRoom({
+          ...explicitRoom,
+          stageReference: selection.roomId === explicitRoom.roomId
+            ? selection.stageReference || explicitRoom.stageReference
+            : explicitRoom.stageReference,
+          stageReferenceVersion: selection.roomId === explicitRoom.roomId
+            ? selection.stageReferenceVersion || explicitRoom.stageReferenceVersion || 0
+            : explicitRoom.stageReferenceVersion || 0,
+        })
         return
       }
       if (selection.roomId) {
         setSelectionStatus(source || 'ready')
         setError('')
+        setDesktopSelection(null)
         setSelectedRoom((current) => {
           if (current?.roomId && current.roomId !== selection.roomId) {
             window.location.reload()
@@ -669,10 +899,13 @@ export default function App() {
             worldId: selection.worldId || selection.roomId,
             worldName: selection.worldName || null,
             stageReference: selection.stageReference || EMPTY_STAGE_REFERENCE,
+            stageReferenceVersion: selection.stageReferenceVersion || 0,
           }
         })
       } else {
         setSelectionStatus('waiting')
+        setError('')
+        setDesktopSelection(null)
         setSelectedRoom((current) => {
           if (current?.roomId) {
             window.location.reload()
@@ -683,14 +916,37 @@ export default function App() {
       }
     }
 
+    const pollSelection = async () => {
+      if (cancelled) return
+      inFlightPoll?.abort()
+      inFlightPoll = new AbortController()
+      try {
+        const response = await fetch(selectionCurrentUrl, { signal: inFlightPoll.signal })
+        if (!response.ok) throw new Error(`selection ${response.status}`)
+        applySelection(await response.json(), 'polling')
+      } catch (pollError) {
+        if (!cancelled && pollError?.name !== 'AbortError') {
+          setSelectionStatus('backend unreachable')
+          setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
+        }
+      } finally {
+        if (!cancelled) pollTimer = window.setTimeout(pollSelection, 1600)
+      }
+    }
+
     const connectSelectionSocket = () => {
       if (cancelled) return
       window.clearTimeout(reconnectTimer)
       setSelectionStatus((current) => (current === 'waiting' ? current : 'connecting'))
       socket = new WebSocket(selectionWsUrl)
+      let opened = false
 
       socket.addEventListener('open', () => {
-        if (!cancelled) setSelectionStatus('listening')
+        if (!cancelled) {
+          opened = true
+          setSelectionStatus('listening')
+          setError('')
+        }
       })
 
       socket.addEventListener('message', (event) => {
@@ -707,22 +963,29 @@ export default function App() {
 
       socket.addEventListener('close', () => {
         if (cancelled) return
-        setSelectionStatus('reconnecting')
+        setSelectionStatus(opened ? 'reconnecting' : 'backend unreachable')
+        if (!opened) setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
         reconnectTimer = window.setTimeout(connectSelectionSocket, RECONNECT_DELAY_MS)
       })
 
       socket.addEventListener('error', () => {
-        if (!cancelled) setSelectionStatus('selection socket error')
+        if (!cancelled) {
+          setSelectionStatus('backend unreachable')
+          setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
+        }
       })
     }
 
+    pollSelection()
     connectSelectionSocket()
     return () => {
       cancelled = true
       window.clearTimeout(reconnectTimer)
+      window.clearTimeout(pollTimer)
+      inFlightPoll?.abort()
       socket?.close()
     }
-  }, [explicitRoom, selectionWsUrl])
+  }, [backendUrl, explicitRoom, selectionCurrentUrl, selectionWsUrl])
 
   useEffect(() => {
     setStatus(roomId ? 'idle' : 'waiting')
@@ -734,54 +997,10 @@ export default function App() {
     setVisualObservation(null)
     setSelectedCandidateId(null)
     setSemanticError('')
-    setVoiceSession(null)
-    setVoiceEvents([])
-    setAgentTurns([])
-    setProposals([])
-    setPermissionRequests([])
-    setVoiceStatus('voice idle')
-    setIsRecording(false)
     localHadUserContentRef.current = false
     userInteractedRef.current = false
     previousSourceIdsRef.current = new Set()
   }, [roomId])
-
-  const applyVoiceState = useCallback((message) => {
-    if (Array.isArray(message.voiceSessions)) {
-      setVoiceSession((current) => message.voiceSessions.find((session) => session.sessionId === current?.sessionId) || message.voiceSessions.find((session) => session.status !== 'ended') || current)
-      const active = message.voiceSessions.find((session) => session.status !== 'ended')
-      if (active) setVoiceStatus(`voice ${active.status}`)
-    }
-    if (Array.isArray(message.voiceEvents)) {
-      setVoiceEvents((current) => {
-        const byId = new Map(current.map((event) => [event.eventId, event]))
-        message.voiceEvents.forEach((event) => byId.set(event.eventId, event))
-        return Array.from(byId.values()).slice(-40)
-      })
-    }
-    if (Array.isArray(message.agentTurns)) setAgentTurns(message.agentTurns)
-    if (Array.isArray(message.proposals)) setProposals(message.proposals)
-    if (Array.isArray(message.permissionRequests)) setPermissionRequests(message.permissionRequests)
-  }, [])
-
-  const activePendingCandidate = useMemo(() => {
-    const candidates = semanticDraft?.candidates || []
-    return candidates.find((candidate) => candidate.candidateId === selectedCandidateId && candidate.status === 'needs_answer')
-      || candidates.find((candidate) => candidate.status === 'needs_answer')
-      || null
-  }, [semanticDraft, selectedCandidateId])
-
-  useEffect(() => {
-    if (!activePendingCandidate?.question?.prompt || !window.speechSynthesis) return
-    const utterance = new SpeechSynthesisUtterance(activePendingCandidate.question.prompt)
-    utterance.rate = 0.96
-    utterance.pitch = 1
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(utterance)
-    return () => {
-      window.speechSynthesis?.cancel()
-    }
-  }, [activePendingCandidate?.questionId])
 
   const sendCaptureNow = useCallback(() => {
     const editor = editorRef.current
@@ -871,10 +1090,12 @@ export default function App() {
 
     setStatus('connecting')
     const socket = new WebSocket(urls.websocket)
+    let opened = false
     socketRef.current = socket
 
     socket.addEventListener('open', () => {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
+      opened = true
       setStatus('connected')
       setError('')
       if (pendingCaptureRef.current) sendCaptureNow()
@@ -895,14 +1116,14 @@ export default function App() {
         setRoomVersion(message.version ?? 0)
         setSemanticDraft(message.semanticDraft || null)
         setVisualObservation(message.visualObservation || null)
-        applyVoiceState(message)
+        mergeSelectedRoomContext(message)
       } else if (message.type === 'projection_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
         setLastSyncedAt(message.updatedAt || new Date().toISOString())
         setSemanticDraft(message.semanticDraft || null)
         setVisualObservation(message.visualObservation || null)
-        applyVoiceState(message)
+        mergeSelectedRoomContext(message)
       } else if (message.type === 'semantic_draft_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
@@ -912,8 +1133,6 @@ export default function App() {
         setRoomVersion(message.version ?? 0)
         setVisualObservation(message.visualObservation || null)
         if (message.semanticDraft) setSemanticDraft(message.semanticDraft)
-      } else if (message.type === 'voice_room_state_updated') {
-        applyVoiceState(message)
       } else if (message.type === 'error') {
         setError(message.message || 'Backend rejected a message.')
         setSemanticError(message.message || 'Backend rejected a message.')
@@ -924,87 +1143,17 @@ export default function App() {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
       socketRef.current = null
       if (!mountedRef.current || mountIdRef.current !== mountId) return
-      setStatus('disconnected')
+      setStatus(opened ? 'disconnected' : 'error')
+      if (!opened) setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
       reconnectTimerRef.current = window.setTimeout(() => connectWebSocket(mountId), RECONNECT_DELAY_MS)
     })
 
     socket.addEventListener('error', () => {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
       setStatus('error')
+      setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
     })
-  }, [applyVoiceState, sendCaptureNow, urls])
-
-  const stopVoice = useCallback(async (sendStop = true) => {
-    if (sendStop && voiceSocketRef.current?.readyState === WebSocket.OPEN) {
-      voiceSocketRef.current.send(JSON.stringify({ type: 'stop' }))
-    }
-    if (mediaRecorderRef.current) {
-      try { mediaRecorderRef.current.stop() } catch (_error) {}
-      mediaRecorderRef.current = null
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop())
-      micStreamRef.current = null
-    }
-    if (voiceSocketRef.current) {
-      const socket = voiceSocketRef.current
-      voiceSocketRef.current = null
-      try { socket.close() } catch (_error) {}
-    }
-    if (voiceSession?.sessionId && urls) {
-      fetch(voiceSessionUrlForRoom(backendUrl, roomId, voiceSession.sessionId), { method: 'DELETE' }).catch(() => {})
-    }
-    setIsRecording(false)
-    setVoiceStatus('voice idle')
-  }, [backendUrl, roomId, urls, voiceSession])
-
-  const startVoice = useCallback(async () => {
-    if (!urls || isRecording) return
-    if (!navigator.mediaDevices || !window.MediaRecorder) {
-      setVoiceStatus('mic unavailable')
-      return
-    }
-    setVoiceStatus('voice starting')
-    try {
-      const response = await fetch(urls.voiceSessions, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: clientIdRef.current, worldId: selectedRoom?.worldId || roomId }),
-      })
-      if (!response.ok) {
-        const body = await response.json().catch(() => null)
-        throw new Error(body?.detail?.message || `Voice failed: ${response.status}`)
-      }
-      const session = await response.json()
-      setVoiceSession(session)
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      micStreamRef.current = stream
-      const socket = new WebSocket(voiceWsUrlForRoom(backendUrl, roomId, session.sessionId))
-      voiceSocketRef.current = socket
-      socket.addEventListener('open', () => {
-        const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : undefined
-        const recorder = new MediaRecorder(stream, options)
-        mediaRecorderRef.current = recorder
-        recorder.addEventListener('dataavailable', (event) => {
-          if (event.data?.size && socket.readyState === WebSocket.OPEN) socket.send(event.data)
-        })
-        recorder.start(250)
-        setIsRecording(true)
-        setVoiceStatus('voice listening')
-      })
-      socket.addEventListener('close', () => {
-        stopVoice(false)
-      })
-    } catch (requestError) {
-      setVoiceStatus(requestError.message || 'voice error')
-      stopVoice(false)
-    }
-  }, [backendUrl, isRecording, roomId, selectedRoom?.worldId, stopVoice, urls])
-
-  const toggleVoice = useCallback(() => {
-    if (isRecording) stopVoice()
-    else startVoice()
-  }, [isRecording, startVoice, stopVoice])
+  }, [backendUrl, mergeSelectedRoomContext, sendCaptureNow, urls])
 
   const handleMount = useCallback(
     (editor) => {
@@ -1026,6 +1175,7 @@ export default function App() {
           setRoomVersion(room.version ?? 0)
           setSemanticDraft(room.semanticDraft || null)
           setVisualObservation(room.visualObservation || null)
+          mergeSelectedRoomContext(room)
           localHadUserContentRef.current = projectionObjectCount(room.projection) > 0
 
           if (room.capture) {
@@ -1034,7 +1184,11 @@ export default function App() {
           ensureStageFrame(editor)
         } catch (requestError) {
           ensureStageFrame(editor)
-          setError(requestError.message || 'Could not load backend capture.')
+          setError(
+            requestError instanceof TypeError
+              ? backendUnreachableMessage(backendUrlInputValue(backendUrl))
+              : requestError.message || 'Could not load backend capture.',
+          )
         } finally {
           if (!mountedRef.current || mountIdRef.current !== mountId) return
           loadingCaptureRef.current = false
@@ -1061,32 +1215,20 @@ export default function App() {
         cleanupStoreListenerRef.current = null
         socketRef.current?.close()
         socketRef.current = null
-        stopVoice(false)
         editorRef.current = null
       }
     },
-    [connectWebSocket, scheduleCaptureSend, stopVoice, urls],
+    [backendUrl, connectWebSocket, mergeSelectedRoomContext, scheduleCaptureSend, urls],
   )
 
   if (!roomId) {
     return (
-      <main className="draw-app draw-app-waiting">
-        <section className="selection-wait-panel" aria-label="Desktop room selection">
-          <h1>Waiting for desktop selection</h1>
-          <p>Open a level on the desktop with Edit Level.</p>
-          <dl>
-            <div>
-              <dt>Status</dt>
-              <dd>{selectionStatus}</dd>
-            </div>
-            <div>
-              <dt>Backend</dt>
-              <dd>{backendUrl.toString()}</dd>
-            </div>
-          </dl>
-          {error ? <p className="selection-error">{error}</p> : null}
-        </section>
-      </main>
+      <JoinRoomScreen
+        backendUrl={backendUrl}
+        selectionStatus={selectionStatus}
+        error={error}
+        onJoin={handleJoinRoom}
+      />
     )
   }
 
@@ -1099,69 +1241,73 @@ export default function App() {
       <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} />
       <aside className="editor-chrome" aria-label="Magic Board editor tools">
         <div className="editor-chrome-scroll">
+          <DesktopSelectionPanel
+            selection={desktopSelection}
+            currentRoomId={roomId}
+            onSwitch={handleSwitchToSelection}
+          />
           <SemanticPanel
             semanticDraft={semanticDraft}
             selectedCandidateId={selectedCandidateId}
             onSelectCandidate={setSelectedCandidateId}
             onAnswer={sendClarificationAnswer}
             error={semanticError}
+            visualObservation={visualObservation}
           />
-          <VisualObservationPanel observation={visualObservation} />
-          <VoicePanel
-            voiceStatus={voiceStatus}
-            voiceEvents={voiceEvents}
-            agentTurns={agentTurns}
-            proposals={proposals}
-            permissionRequests={permissionRequests}
-            isRecording={isRecording}
-            onToggleMic={toggleVoice}
-          />
-          <section className="debug-panel" aria-label="Sync status">
-            <div className={`status-dot status-${status}`} />
-            <dl>
-              <div>
-                <dt>Status</dt>
-                <dd>{status}</dd>
-              </div>
-              <div>
-                <dt>Room</dt>
-                <dd>{roomId}</dd>
-              </div>
-              <div>
-                <dt>World</dt>
-                <dd>{selectedRoom?.worldName || selectedRoom?.worldId || 'selected'}</dd>
-              </div>
-              <div>
-                <dt>Reference</dt>
-                <dd>{`${selectedRoom?.stageReference?.platforms?.length || 0} platforms · ${selectedRoom?.stageReference?.portals?.length || 0} portals`}</dd>
-              </div>
-              <div>
-                <dt>Backend</dt>
-                <dd>{backendVersion}</dd>
-              </div>
-              <div>
-                <dt>Version</dt>
-                <dd>{roomVersion}</dd>
-              </div>
-              <div>
-                <dt>Objects</dt>
-                <dd>{projectionCount}</dd>
-              </div>
-              <div>
-                <dt>Draft</dt>
-                <dd>{semanticCandidateCount(semanticDraft)}</dd>
-              </div>
-              <div>
-                <dt>Vision</dt>
-                <dd>{visualObservationLabel(visualObservation)}</dd>
-              </div>
-              <div>
-                <dt>Synced</dt>
-                <dd>{formatTime(lastSyncedAt)}</dd>
-              </div>
-            </dl>
-            {error ? <p>{error}</p> : null}
-          </section>
+          <details className="details-drawer">
+            <summary>Details</summary>
+            <VisualObservationPanel observation={visualObservation} />
+            <section className="debug-panel" aria-label="Sync status">
+              <div className={`status-dot status-${syncStatusClassName(status)}`} />
+              <dl>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{syncStatusLabel(status)}</dd>
+                </div>
+                <div>
+                  <dt>Room</dt>
+                  <dd>{roomId}</dd>
+                </div>
+                <div>
+                  <dt>Endpoint</dt>
+                  <dd>{backendUrlInputValue(backendUrl)}</dd>
+                </div>
+                <div>
+                  <dt>World</dt>
+                  <dd>{selectedRoom?.worldName || selectedRoom?.worldId || 'selected'}</dd>
+                </div>
+                <div>
+                  <dt>Reference</dt>
+                  <dd>{`${selectedRoom?.stageReference?.platforms?.length || 0} platforms · ${selectedRoom?.stageReference?.portals?.length || 0} portals`}</dd>
+                </div>
+                <div>
+                  <dt>Backend</dt>
+                  <dd>{backendVersion}</dd>
+                </div>
+                <div>
+                  <dt>Version</dt>
+                  <dd>{roomVersion}</dd>
+                </div>
+                <div>
+                  <dt>Objects</dt>
+                  <dd>{projectionCount}</dd>
+                </div>
+                <div>
+                  <dt>Draft</dt>
+                  <dd>{semanticCandidateCount(semanticDraft)}</dd>
+                </div>
+                <div>
+                  <dt>Vision</dt>
+                  <dd>{visualObservationLabel(visualObservation)}</dd>
+                </div>
+                <div>
+                  <dt>Synced</dt>
+                  <dd>{formatTime(lastSyncedAt)}</dd>
+                </div>
+              </dl>
+              {error ? <p>{error}</p> : null}
+            </section>
+          </details>
         </div>
       </aside>
     </main>
