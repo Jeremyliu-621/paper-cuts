@@ -61,13 +61,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "services" / "chloe"))
 import config
 
+import torch
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoTokenizer
 
-# optimum-neuron's Trainium-aware SFT trainer + config (drop-in for TRL's SFTTrainer/SFTConfig,
-# but XLA/NeuronCore aware). These are the EXACT class names from the sft_lora_finetune_llm tutorial.
-from optimum.neuron import NeuronSFTConfig, NeuronSFTTrainer
+# optimum-neuron's Trainium-aware SFT trainer + config + the trainable model class (drop-in for
+# TRL's SFTTrainer/SFTConfig, but XLA/NeuronCore aware). From the sft_lora_finetune_llm tutorial.
+from optimum.neuron import NeuronModelForCausalLM, NeuronSFTConfig, NeuronSFTTrainer
 
 
 def parse_args() -> argparse.Namespace:
@@ -179,12 +180,22 @@ def main() -> None:
         seed=args.seed,
     )
 
+    # --- load the trainable Neuron model with the trn_config the SFTConfig built ---
+    # optimum-neuron's NeuronSFTTrainer can't load a model STRING itself (its internal
+    # from_pretrained needs `trn_config`), so we pre-load the model — the tutorial's pattern.
+    print(f"[load] NeuronModelForCausalLM {args.model} (with trn_config from SFTConfig)")
+    model = NeuronModelForCausalLM.from_pretrained(
+        args.model,
+        sft_config.trn_config,
+        torch_dtype=torch.bfloat16,
+    )
+
     # --- the trainer: passes the LoRA config through to PEFT, formats each row via our func ---
     print(f"[train] base={args.model} | steps={args.max_steps} | "
           f"effective_batch={args.batch_size * args.gradient_accumulation_steps} (x world) | "
           f"seq_len={args.max_seq_len}")
     trainer = NeuronSFTTrainer(
-        model=args.model,
+        model=model,
         processing_class=tokenizer,  # trl 0.24 renamed the `tokenizer` arg -> `processing_class`
         train_dataset=dataset,
         peft_config=lora_config,
