@@ -1,0 +1,11 @@
+# CHLOE no-Neuron PEFT trainer (train/train_chloe_peft.py) — Colab CUDA / any GPU / CPU.
+# NOT the Neuron box. Saves a STANDARD peft adapter (adapter_config.json + adapter_model.safetensors)
+# that services/chloe/serve.py loads directly via PeftModel.from_pretrained — no consolidation.
+#
+# On Colab, torch is preinstalled (CUDA build) — do NOT reinstall it. The rest:
+transformers>=4.45
+peft>=0.13
+datasets>=2.20
+accelerate>=0.34
+safetensors>=0.4
+sentencepiece
