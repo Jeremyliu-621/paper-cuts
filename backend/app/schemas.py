@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 BACKEND_VERSION = "0.1.0"
 
 FinisherStyle = Literal["Melt", "Explode", "Dissolve", "Squish", "Tear", "Crumble", "Cake-ify"]
+FinisherSourceType = Literal["pikaffects_image", "doodle_keyframes", "motion_reference"]
 FinisherJobStatus = Literal["queued", "generating", "ready", "failed", "missing_key"]
 
 
@@ -265,10 +266,15 @@ class FinisherJobRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     attacker_id: str = Field(alias="attackerId")
-    victim_id: str = Field(alias="victimId")
-    victim_skin_hash: str = Field(alias="victimSkinHash")
+    victim_id: str = Field(default="", alias="victimId")
+    victim_skin_hash: str = Field(default="", alias="victimSkinHash")
     style: FinisherStyle = "Melt"
-    image_data_url: str = Field(alias="imageDataUrl")
+    image_data_url: str | None = Field(default=None, alias="imageDataUrl")
+    source_type: FinisherSourceType = Field(default="pikaffects_image", alias="sourceType")
+    motion_clip_data_url: str | None = Field(default=None, alias="motionClipDataUrl")
+    keyframe_data_urls: list[str] = Field(default_factory=list, alias="keyframeDataUrls")
+    motion_summary: dict[str, Any] | None = Field(default=None, alias="motionSummary")
+    skin_hash: str | None = Field(default=None, alias="skinHash")
 
 
 class FinisherJobResponse(BaseModel):
@@ -330,6 +336,17 @@ class ClarificationAnswerMessage(BaseModel):
     client_id: str | None = Field(default=None, alias="clientId")
 
 
+class StageEditMessage(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    type: Literal["stage_edit"] = "stage_edit"
+    operation: dict[str, Any]
+    stage_reference_version: int | None = Field(default=None, alias="stageReferenceVersion")
+    world_id: str | None = Field(default=None, alias="worldId")
+    client_id: str | None = Field(default=None, alias="clientId")
+    sent_at: str | None = Field(default=None, alias="sentAt")
+
+
 class HelloMessage(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -388,6 +405,19 @@ class VisualObservationUpdatedMessage(BaseModel):
     version: int
     visual_observation: VisualObservation = Field(alias="visualObservation")
     semantic_draft: SemanticDraft | None = Field(default=None, alias="semanticDraft")
+
+
+class StageEditUpdatedMessage(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: Literal["stage_edit_updated"] = "stage_edit_updated"
+    room_id: str = Field(alias="roomId")
+    version: int
+    stage_reference: dict[str, Any] = Field(alias="stageReference")
+    stage_reference_version: int = Field(alias="stageReferenceVersion")
+    operation: dict[str, Any]
+    world_id: str | None = Field(default=None, alias="worldId")
+    source_client_id: str | None = Field(default=None, alias="sourceClientId")
 
 
 class AgentToolCall(BaseModel):

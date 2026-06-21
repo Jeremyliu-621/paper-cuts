@@ -22,6 +22,7 @@ from .schemas import (
     FinisherJobRequest,
     HelloMessage,
     RoomSelectionRequest,
+    StageEditMessage,
 )
 
 load_backend_env()
@@ -234,7 +235,7 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
             if message_type is None:
                 await _send_error(websocket, "missing type")
                 continue
-            if message_type not in {"canvas_capture", "clarification_answer"}:
+            if message_type not in {"canvas_capture", "clarification_answer", "stage_edit"}:
                 await _send_error(websocket, f"unknown type: {message_type}")
                 continue
 
@@ -248,7 +249,7 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                 update = rooms.store_capture(room_id, message)
                 await rooms.broadcast(room_id, update)
                 _schedule_visual_observation(room_id)
-            else:
+            elif message_type == "clarification_answer":
                 try:
                     answer = ClarificationAnswerMessage.model_validate(data)
                     update = rooms.store_answer(room_id, answer)
@@ -259,6 +260,18 @@ async def room_socket(websocket: WebSocket, room_id: str) -> None:
                     await _send_error(websocket, str(error))
                     continue
                 await rooms.broadcast_semantic(room_id, update)
+            else:
+                try:
+                    edit = StageEditMessage.model_validate(data)
+                    update = rooms.store_stage_edit(room_id, edit)
+                except ValidationError as error:
+                    await _send_error(websocket, _validation_message(error))
+                    continue
+                except ValueError as error:
+                    await _send_error(websocket, str(error))
+                    continue
+                await rooms.broadcast_stage_edit(room_id, update)
+                await rooms.broadcast_selection()
     except WebSocketDisconnect:
         pass
     finally:

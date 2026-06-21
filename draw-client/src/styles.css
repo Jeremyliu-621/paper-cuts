@@ -297,93 +297,15 @@ button {
   font-weight: 700;
 }
 
-.platform-reference-frame {
+.stage-reference-canvas {
   position: absolute;
   top: 0;
   left: 0;
   width: 1920px;
   height: 1080px;
-  background: transparent;
   pointer-events: none;
-  transform: translate(0, 0);
-  transform-origin: top left;
-  opacity: 0.92;
-}
-
-.platform-reference-svg {
   display: block;
-  width: 1920px;
-  height: 1080px;
-  overflow: visible;
-}
-
-.reference-view-fill {
-  fill: var(--paper);
-}
-
-.reference-bounds {
-  fill: none;
-  stroke: rgba(47, 42, 38, 0.34);
-  stroke-dasharray: 18 14;
-  stroke-linecap: round;
-  stroke-width: 3px;
-  vector-effect: non-scaling-stroke;
-}
-
-.reference-platform-shadow {
-  display: none;
-}
-
-.reference-platform {
-  fill: var(--paper);
-  stroke: var(--ink);
-  stroke-linejoin: round;
-  stroke-width: 6px;
-  vector-effect: non-scaling-stroke;
-}
-
-.reference-platform-pass {
-  fill: rgba(246, 241, 231, 0.55);
-  stroke: var(--ink-soft);
-  stroke-dasharray: 16 10;
-}
-
-.reference-platform-topline {
-  stroke: var(--ink);
-  stroke-width: 4px;
-  stroke-linecap: round;
-  opacity: 0.62;
-  vector-effect: non-scaling-stroke;
-}
-
-.reference-portal-fill {
-  fill: var(--paper);
-  opacity: 0.72;
-}
-
-.reference-portal-ring {
-  fill: none;
-  stroke: rgba(47, 42, 38, 0.58);
-  stroke-dasharray: 12 9;
-  stroke-linecap: round;
-  stroke-width: 6px;
-  vector-effect: non-scaling-stroke;
-}
-
-.reference-spawn {
-  fill: rgba(212, 102, 63, 0.08);
-  stroke: var(--accent);
-  stroke-dasharray: 8 8;
-  stroke-linecap: round;
-  stroke-width: 4px;
-  vector-effect: non-scaling-stroke;
-}
-
-.reference-spawn-label {
-  fill: var(--accent);
-  font: 24px "Patrick Hand", cursive;
-  text-anchor: middle;
-  user-select: none;
+  opacity: 0.96;
 }
 
 .semantic-candidate-layer {
@@ -394,6 +316,43 @@ button {
   height: 1080px;
   pointer-events: none;
   overflow: visible;
+}
+
+.stage-edit-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: visible;
+  pointer-events: auto;
+}
+
+.stage-edit-hitbox {
+  fill: rgba(212, 102, 63, 0.03);
+  stroke: rgba(47, 42, 38, 0.38);
+  stroke-dasharray: 16 10;
+  stroke-width: 5px;
+  cursor: grab;
+  vector-effect: non-scaling-stroke;
+}
+
+.stage-edit-hitbox.portal {
+  fill: rgba(63, 111, 160, 0.05);
+}
+
+.stage-edit-hitbox.selected {
+  fill: rgba(212, 102, 63, 0.08);
+  stroke: var(--accent);
+  stroke-width: 8px;
+}
+
+.stage-edit-resize {
+  fill: var(--accent);
+  stroke: var(--paper);
+  stroke-width: 5px;
+  cursor: nwse-resize;
+  vector-effect: non-scaling-stroke;
 }
 
 .semantic-candidate {
@@ -441,6 +400,58 @@ button {
 
 .tl-shapes {
   background: transparent;
+}
+
+.magic-toolbar {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  z-index: 34;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  padding: 8px;
+  border: var(--line) solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: var(--panel-shadow);
+  pointer-events: auto;
+}
+
+.magic-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.magic-toolbar button {
+  min-height: 34px;
+  padding: 4px 10px 6px;
+  border: var(--thin-line) solid var(--ink);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  box-shadow: var(--soft-shadow);
+}
+
+.magic-toolbar button.active {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.magic-toolbar button.danger {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.magic-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.48;
+  box-shadow: none;
 }
 
 .editor-chrome {

@@ -13,7 +13,7 @@
   const WOLF_SIZE = 2;   // the werewolf transforms to 2x size (hurtbox, body, and its melee reach)
   const CHARGE_NEED = 75; // cumulative % damage dealt to fill the ultimate meter
   // the sniper ultimate's shot: very fast, long, hard-hitting
-  const SNIPER_SHOT = { speed: 2400, damage: 42, kbBase: 46, kbScale: 0.18, angle: 0, gravity: 0, life: 0.9, r: 48, sniper: true };
+  const SNIPER_SHOT = { speed: 2400, damage: 42, kbBase: 46, kbScale: 0.18, angle: 0, gravity: 0, life: 0.9, r: 48, sniper: true, ult: true };
 
   function clonePose(p) {
     return { lean: p.lean, headX: p.headX, headY: p.headY, squash: p.squash,
@@ -54,6 +54,7 @@
       this.ledge = null; this.ledgeCd = 0; this.ledgeLock = 0; // ledge-hang state
       this._portalCd = 0; // teleport cooldown so portals don't ping-pong
       this.lastHitBy = null; // most recent attacker, for KO attribution (score modes)
+      this.lastHitWasUltimate = false;
       this.item = null;      // held power-up prop (set by a mode): { key, name, left, action }. F uses it.
       // combo + HUD juice: combo = current chain landed, comboT = window left to extend it,
       // comboFlash pops the badge on each hit, hitFlash punches the % when you take a big hit
@@ -334,6 +335,9 @@
       let comboMul = 1;
       if (attacker && attacker !== this) {
         this.lastHitBy = attacker;
+        this.lastHitWasUltimate = !!(hit.ult
+          || (attacker.action && attacker.action.data && attacker.action.data.ult)
+          || (attacker.ult && attacker.ult.type === 'werewolf'));
         attacker.combo += 1; attacker.comboT = 1.1; attacker.comboFlash = 0.5;
         comboMul = 1 + Math.min(0.8, (attacker.combo - 1) * 0.12);
       }
@@ -428,6 +432,7 @@
         this.respawnT = 0.8; this.damage = 0;
       }
       this.lastHitBy = null;
+      this.lastHitWasUltimate = false;
     }
 
     _respawn(world) {

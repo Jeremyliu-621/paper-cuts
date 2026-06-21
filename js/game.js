@@ -288,6 +288,8 @@
       if (this.state !== 'playing') {
         if (this.state === 'over' || this.state === 'outro' || this.state === 'victory' || this.winner) this.rebuild();
         if (DS.Finishers) DS.Finishers.preloadForGame(this);
+        this._finisherPollT = 0;
+        this._finisherPolling = false;
         this.state = 'playing';
       }
     }
@@ -329,6 +331,7 @@
       if (!victim || victim.stocks > 1) return false;
       const attacker = victim.lastHitBy;
       if (!attacker || attacker === victim || attacker.dead) return false;
+      if (!victim.lastHitWasUltimate) return false;
       const clip = DS.Finishers.findReadyClip(attacker, victim);
       if (!clip) return false;
       const video = DS.Finishers.videoForClip(clip);
@@ -390,6 +393,7 @@
         return;
       }
       this._updateStage(dt);
+      this._pollFinishers(dt);
       if (this.demo) {
         this._aiT = (this._aiT || 0) + dt;
         for (const f of this.fighters) f.update(dt, this._ai(f), this.world);
@@ -406,6 +410,22 @@
         this.outroT -= dt;
         this.winFlash = Math.max(0, (this.winFlash || 0) - dt * 0.7);
         if (this.outroT <= 0) this._beginWipe();
+      }
+    }
+
+    _pollFinishers(dt) {
+      if (!DS.Finishers || !DS.Finishers.refreshPendingForGame || this._finisherPolling) return;
+      this._finisherPollT = (this._finisherPollT || 0) - dt;
+      if (this._finisherPollT > 0) return;
+      this._finisherPollT = 2.2;
+      this._finisherPolling = true;
+      const done = () => { this._finisherPolling = false; if (DS.Finishers) DS.Finishers.preloadForGame(this); };
+      try {
+        const result = DS.Finishers.refreshPendingForGame(this);
+        if (result && result.then) result.then(done, done);
+        else done();
+      } catch (_error) {
+        done();
       }
     }
 
@@ -584,7 +604,7 @@
       for (const f of this.fighters) {
         if (f === pr.owner || f.dead || f.respawnT > 0 || f.invuln > 0 || pr.hits.has(f)) continue;
         if (Math.abs(f.x - pr.x) < f.w / 2 + pr.r && Math.abs(f.y - pr.y) < f.h / 2 + pr.r) {
-          pr.hits.add(f); f._takeHit(cfg, pr.vx >= 0 ? 1 : -1, pr.owner, this.world);
+          pr.hits.add(f); f._takeHit(Object.assign({ ult: true }, cfg), pr.vx >= 0 ? 1 : -1, pr.owner, this.world);
           this.effects.ultHit(pr.x, pr.y, 1.5, pr.owner && pr.owner.tagCol); this.effects.hitstop(0.12);
         }
       }

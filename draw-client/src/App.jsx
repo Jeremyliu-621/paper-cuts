@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import '../../js/rng.js'
+import '../../js/draw.js'
+import '../../js/stage.js'
 import {
   Tldraw,
   createShapeId,
@@ -14,7 +17,7 @@ const SYNC_DEBOUNCE_MS = 120
 const RECONNECT_DELAY_MS = 1000
 const GAME_FRAME = { x: 0, y: 0, w: 1920, h: 1080 }
 const FRAME_SHAPE_ID = createShapeId('magicboard-stage-frame')
-const EMPTY_STAGE_REFERENCE = { view: { w: GAME_FRAME.w, h: GAME_FRAME.h }, platforms: [], portals: [], spawns: [] }
+const EMPTY_STAGE_REFERENCE = { view: { w: GAME_FRAME.w, h: GAME_FRAME.h }, platforms: [], portals: [], spawns: [], decor: [] }
 
 const SIZE_TO_WIDTH = {
   s: 3,
@@ -147,6 +150,45 @@ function visualObservationUrlForRoom(backendUrl, roomId) {
   url.search = ''
   url.hash = ''
   return url.toString()
+}
+
+function applyStageOperation(stageReference, operation) {
+  const reference = {
+    ...(stageReference || EMPTY_STAGE_REFERENCE),
+    platforms: cloneArray(stageReference?.platforms),
+    portals: cloneArray(stageReference?.portals),
+    spawns: cloneArray(stageReference?.spawns),
+    decor: cloneArray(stageReference?.decor),
+    bg: cloneArray(stageReference?.bg),
+  }
+  const targetId = String(operation?.targetId || '')
+  if (operation?.type === 'add_platform') {
+    reference.platforms.push({ ...operation.platform })
+  } else if (operation?.type === 'update_platform') {
+    reference.platforms = reference.platforms.map((platform, index) => {
+      if (itemEditorId('platform', platform, index) !== targetId) return platform
+      return { ...platform, ...(operation.patch || {}) }
+    })
+  } else if (operation?.type === 'delete_platform') {
+    reference.platforms = reference.platforms.filter((platform, index) => itemEditorId('platform', platform, index) !== targetId)
+  } else if (operation?.type === 'add_portal_pair') {
+    const pair = operation.portalPair || {}
+    if (pair.a && pair.b) reference.portals.push({ ...pair.a }, { ...pair.b })
+  } else if (operation?.type === 'update_portal') {
+    reference.portals = reference.portals.map((portal, index) => {
+      if (itemEditorId('portal', portal, index) !== targetId) return portal
+      return { ...portal, ...(operation.patch || {}) }
+    })
+  } else if (operation?.type === 'delete_portal_pair') {
+    let linkedIds = new Set()
+    reference.portals.forEach((portal, index) => {
+      if (itemEditorId('portal', portal, index) === targetId) {
+        linkedIds = new Set([portal.id, portal.link, portal.editorId].filter(Boolean).map(String))
+      }
+    })
+    reference.portals = reference.portals.filter((portal) => ![portal.id, portal.link, portal.editorId].some((id) => linkedIds.has(String(id))))
+  }
+  return reference
 }
 
 function selectionWsUrlForBackend(backendUrl) {
@@ -400,80 +442,258 @@ function ensureStageFrame(editor) {
   editor.setCurrentTool('draw')
 }
 
-function platformClassName(platform) {
-  const kind = platform.kind || (platform.pass ? 'float' : 'ground')
-  return `reference-platform reference-platform-${kind}${platform.pass ? ' reference-platform-pass' : ''}`
+function cloneArray(value) {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => ({ ...item }))
 }
 
-function PlatformReferenceLayer({ stageReference }) {
+function itemEditorId(kind, item, index) {
+  if (!item) return ''
+  if (item.editorId || item.id) return String(item.editorId || item.id)
+  const source = item.source
+  if (source?.kind === 'magicboard_agent' && source.candidateId) return `${kind}-candidate-${source.candidateId}`
+  if (kind === 'portal') return `portal-${index}-${Math.round(item.x || 0)}-${Math.round(item.y || 0)}-${Math.round(item.r || 0)}`
+  return `platform-${index}-${Math.round(item.x || 0)}-${Math.round(item.y || 0)}-${Math.round(item.w || 0)}-${Math.round(item.h || 0)}`
+}
+
+function stageFromReference(stageReference) {
   const reference = stageReference || EMPTY_STAGE_REFERENCE
-  const view = reference.view || { w: GAME_FRAME.w, h: GAME_FRAME.h }
-  const bounds = reference.bounds || { x0: 0, y0: 0, x1: view.w, y1: view.h }
-  const platforms = reference.platforms || []
-  const portals = reference.portals || []
-  const spawns = reference.spawns || []
+  const view = reference.view || {}
+  const x0 = reference.bounds?.x0 ?? view.x ?? GAME_FRAME.x
+  const y0 = reference.bounds?.y0 ?? view.y ?? GAME_FRAME.y
+  const x1 = reference.bounds?.x1 ?? x0 + (view.w || GAME_FRAME.w)
+  const y1 = reference.bounds?.y1 ?? y0 + (view.h || GAME_FRAME.h)
+  return {
+    bounds: { x0, y0, x1, y1 },
+    platforms: cloneArray(reference.platforms),
+    portals: cloneArray(reference.portals),
+    spawns: cloneArray(reference.spawns),
+    decor: cloneArray(reference.decor),
+    bg: cloneArray(reference.bg),
+  }
+}
+
+function platformForKind(kind) {
+  const base = { x: 760, y: 700, w: 320, h: 44, kind: 'wood', pass: true }
+  if (kind === 'spikes') {
+    return { ...base, w: 280, h: 46, kind: 'spikes', pass: false, hurt: { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 } }
+  }
+  if (kind === 'cannon') {
+    return { ...base, w: 92, h: 56, kind: 'cannon', pass: false, fire: { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 } }
+  }
+  return base
+}
+
+function portalPairAtCenter() {
+  const stamp = `ipad-${Date.now().toString(36)}`
+  const a = { id: `${stamp}-a`, editorId: `${stamp}-a`, link: `${stamp}-b`, x: 700, y: 610, r: 74, col: '#3f6fa0' }
+  const b = { id: `${stamp}-b`, editorId: `${stamp}-b`, link: `${stamp}-a`, x: 1220, y: 610, r: 74, col: '#3f6fa0' }
+  return { a, b }
+}
+
+function CanvasStageReferenceLayer({ stageReference }) {
+  const canvasRef = useRef(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const DS = window.DS
+    if (!canvas || !DS?.stage?.drawStage || !DS?.draw) return
+
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
+    canvas.width = Math.round(GAME_FRAME.w * dpr)
+    canvas.height = Math.round(GAME_FRAME.h * dpr)
+
+    const ctx = canvas.getContext('2d')
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, GAME_FRAME.w, GAME_FRAME.h)
+
+    DS.VIEW = { w: GAME_FRAME.w, h: GAME_FRAME.h }
+    DS.DPR = dpr
+    DS.draw.clearCache?.()
+    DS.draw.setLod?.(1)
+
+    const stage = stageFromReference(stageReference)
+    ctx.drawImage(DS.draw.paperTexture(GAME_FRAME.w, GAME_FRAME.h), 0, 0)
+    DS.stage.drawBackground(ctx, stage)
+    DS.stage.drawStage(ctx, stage)
+  }, [stageReference])
 
   return (
-    <div
-      className="platform-reference-frame"
+    <canvas
+      ref={canvasRef}
+      className="stage-reference-canvas"
       data-testid="static-platform-reference"
       aria-hidden="true"
+      width={GAME_FRAME.w}
+      height={GAME_FRAME.h}
+    />
+  )
+}
+
+function StageEditLayer({ stageReference, selectedItem, onSelectItem, onCommitEdit }) {
+  const svgRef = useRef(null)
+  const dragRef = useRef(null)
+  const stage = useMemo(() => stageFromReference(stageReference), [stageReference])
+
+  const pointerToStage = useCallback((event) => {
+    const svg = svgRef.current || event.currentTarget.ownerSVGElement || event.currentTarget
+    const point = svg.createSVGPoint()
+    point.x = event.clientX
+    point.y = event.clientY
+    const ctm = svg.getScreenCTM()
+    if (!ctm) return { x: 0, y: 0 }
+    const local = point.matrixTransform(ctm.inverse())
+    return { x: local.x, y: local.y }
+  }, [])
+
+  const startPlatformDrag = useCallback((event, platform, index, mode) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const id = itemEditorId('platform', platform, index)
+    onSelectItem({ type: 'platform', id })
+    dragRef.current = {
+      type: 'platform',
+      mode,
+      targetId: id,
+      start: point,
+      original: { x: platform.x || 0, y: platform.y || 0, w: platform.w || 1, h: platform.h || 1 },
+    }
+    const svg = svgRef.current || event.currentTarget.ownerSVGElement
+    svg?.setPointerCapture?.(event.pointerId)
+  }, [onSelectItem, pointerToStage])
+
+  const startPortalDrag = useCallback((event, portal, index, mode) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const id = itemEditorId('portal', portal, index)
+    onSelectItem({ type: 'portal', id })
+    dragRef.current = {
+      type: 'portal',
+      mode,
+      targetId: id,
+      start: point,
+      original: { x: portal.x || 0, y: portal.y || 0, r: portal.r || 74 },
+    }
+    const svg = svgRef.current || event.currentTarget.ownerSVGElement
+    svg?.setPointerCapture?.(event.pointerId)
+  }, [onSelectItem, pointerToStage])
+
+  const handlePointerMove = useCallback((event) => {
+    const drag = dragRef.current
+    if (!drag) return
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const dx = point.x - drag.start.x
+    const dy = point.y - drag.start.y
+    if (drag.type === 'platform') {
+      const patch = drag.mode === 'resize'
+        ? { w: Math.max(40, drag.original.w + dx), h: Math.max(18, drag.original.h + dy) }
+        : { x: drag.original.x + dx, y: drag.original.y + dy }
+      onCommitEdit({ type: 'update_platform', targetId: drag.targetId, patch }, { preview: true })
+    } else if (drag.type === 'portal') {
+      const patch = drag.mode === 'resize'
+        ? { r: Math.max(30, drag.original.r + dy) }
+        : { x: drag.original.x + dx, y: drag.original.y + dy }
+      onCommitEdit({ type: 'update_portal', targetId: drag.targetId, patch }, { preview: true })
+    }
+  }, [onCommitEdit, pointerToStage])
+
+  const handlePointerUp = useCallback((event) => {
+    const drag = dragRef.current
+    if (!drag) return
+    dragRef.current = null
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const dx = point.x - drag.start.x
+    const dy = point.y - drag.start.y
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+    if (drag.type === 'platform') {
+      onCommitEdit({
+        type: 'update_platform',
+        targetId: drag.targetId,
+        patch: drag.mode === 'resize'
+          ? { w: Math.max(40, drag.original.w + dx), h: Math.max(18, drag.original.h + dy) }
+          : { x: drag.original.x + dx, y: drag.original.y + dy },
+      })
+    } else if (drag.type === 'portal') {
+      onCommitEdit({
+        type: 'update_portal',
+        targetId: drag.targetId,
+        patch: drag.mode === 'resize'
+          ? { r: Math.max(30, drag.original.r + dy) }
+          : { x: drag.original.x + dx, y: drag.original.y + dy },
+      })
+    }
+  }, [onCommitEdit, pointerToStage])
+
+  return (
+    <svg
+      ref={svgRef}
+      className="stage-edit-layer"
+      viewBox={`${GAME_FRAME.x} ${GAME_FRAME.y} ${GAME_FRAME.w} ${GAME_FRAME.h}`}
+      width={GAME_FRAME.w}
+      height={GAME_FRAME.h}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
-      <svg
-        className="platform-reference-svg"
-        viewBox={`0 0 ${view.w} ${view.h}`}
-        width={view.w}
-        height={view.h}
-        focusable="false"
-      >
-        <rect className="reference-view-fill" x="0" y="0" width={view.w} height={view.h} />
-        <rect className="reference-bounds" x={bounds.x0 || 0} y={bounds.y0 || 0} width={(bounds.x1 || view.w) - (bounds.x0 || 0)} height={(bounds.y1 || view.h) - (bounds.y0 || 0)} />
-        {platforms.map((platform, index) => {
-          const radius = Math.min(platform.h / 2, platform.pass ? 16 : 20)
-          return (
-            <g key={`${platform.x}-${platform.y}-${platform.w}-${platform.h}-${index}`}>
+      {stage.platforms.map((platform, index) => {
+        const id = itemEditorId('platform', platform, index)
+        const selected = selectedItem?.type === 'platform' && selectedItem.id === id
+        return (
+          <g key={id}>
+            <rect
+              className={`stage-edit-hitbox${selected ? ' selected' : ''}`}
+              x={platform.x}
+              y={platform.y}
+              width={platform.w}
+              height={platform.h}
+              onPointerDown={(event) => startPlatformDrag(event, platform, index, 'move')}
+            />
+            {selected ? (
               <rect
-                className="reference-platform-shadow"
-                x={platform.x + 9}
-                y={platform.y + 12}
-                width={platform.w}
-                height={platform.h}
-                rx={radius}
-                ry={radius}
+                className="stage-edit-resize"
+                x={(platform.x || 0) + (platform.w || 0) - 26}
+                y={(platform.y || 0) + (platform.h || 0) - 26}
+                width="38"
+                height="38"
+                onPointerDown={(event) => startPlatformDrag(event, platform, index, 'resize')}
               />
+            ) : null}
+          </g>
+        )
+      })}
+      {stage.portals.map((portal, index) => {
+        const id = itemEditorId('portal', portal, index)
+        const selected = selectedItem?.type === 'portal' && selectedItem.id === id
+        return (
+          <g key={id}>
+            <ellipse
+              className={`stage-edit-hitbox portal${selected ? ' selected' : ''}`}
+              cx={portal.x}
+              cy={portal.y}
+              rx={(portal.r || 74) * 0.72}
+              ry={portal.r || 74}
+              onPointerDown={(event) => startPortalDrag(event, portal, index, 'move')}
+            />
+            {selected ? (
               <rect
-                className={platformClassName(platform)}
-                x={platform.x}
-                y={platform.y}
-                width={platform.w}
-                height={platform.h}
-                rx={radius}
-                ry={radius}
+                className="stage-edit-resize"
+                x={(portal.x || 0) - 19}
+                y={(portal.y || 0) + (portal.r || 74) - 19}
+                width="38"
+                height="38"
+                onPointerDown={(event) => startPortalDrag(event, portal, index, 'resize')}
               />
-              <line
-                className="reference-platform-topline"
-                x1={platform.x + radius}
-                y1={platform.y + Math.min(16, platform.h / 2)}
-                x2={platform.x + platform.w - radius}
-                y2={platform.y + Math.min(16, platform.h / 2)}
-              />
-            </g>
-          )
-        })}
-        {portals.map((portal, index) => (
-          <g key={`portal-${portal.id || index}`}>
-            <circle className="reference-portal-fill" cx={portal.x} cy={portal.y} r={portal.r || 44} />
-            <circle className="reference-portal-ring" cx={portal.x} cy={portal.y} r={portal.r || 44} />
+            ) : null}
           </g>
-        ))}
-        {spawns.map((spawn, index) => (
-          <g key={`spawn-${index}`}>
-            <circle className="reference-spawn" cx={spawn.x} cy={spawn.y} r="24" />
-            <text className="reference-spawn-label" x={spawn.x} y={spawn.y + 8}>{index + 1}</text>
-          </g>
-        ))}
-      </svg>
-    </div>
+        )
+      })}
+    </svg>
   )
 }
 
@@ -624,6 +844,53 @@ function DesktopSelectionPanel({ selection, currentRoomId, onSwitch }) {
         Open level
       </button>
     </section>
+  )
+}
+
+function EditorToolbar({
+  tool,
+  selectedItem,
+  onSetTool,
+  onAddPlatform,
+  onAddPortal,
+  onDelete,
+}) {
+  return (
+    <div className="magic-toolbar" aria-label="Level editor tools">
+      <div className="magic-toolbar-group" role="group" aria-label="Mode">
+        <button
+          type="button"
+          className={tool === 'draw' ? 'active' : ''}
+          onClick={() => onSetTool('draw')}
+          title="Draw doodles"
+        >
+          Draw
+        </button>
+        <button
+          type="button"
+          className={tool === 'edit' ? 'active' : ''}
+          onClick={() => onSetTool('edit')}
+          title="Move and resize level objects"
+        >
+          Edit
+        </button>
+      </div>
+      <div className="magic-toolbar-group" role="group" aria-label="Add objects">
+        <button type="button" onClick={() => onAddPlatform('platform')} title="Add platform">+ Platform</button>
+        <button type="button" onClick={() => onAddPlatform('spikes')} title="Add spikes">+ Spikes</button>
+        <button type="button" onClick={() => onAddPlatform('cannon')} title="Add cannon">+ Cannon</button>
+        <button type="button" onClick={onAddPortal} title="Add portal pair">+ Portal</button>
+      </div>
+      <button
+        type="button"
+        className="danger"
+        onClick={onDelete}
+        disabled={!selectedItem}
+        title="Delete selected object"
+      >
+        Delete
+      </button>
+    </div>
   )
 }
 
@@ -779,16 +1046,86 @@ export default function App() {
   const [error, setError] = useState('')
   const [selectionStatus, setSelectionStatus] = useState(explicitRoom ? 'url room' : 'waiting')
   const [desktopSelection, setDesktopSelection] = useState(null)
+  const [activeTool, setActiveTool] = useState('draw')
+  const [selectedStageItem, setSelectedStageItem] = useState(null)
+
+  const updateLocalStageReference = useCallback((operation) => {
+    setSelectedRoom((current) => {
+      if (!current?.stageReference) return current
+      return {
+        ...current,
+        stageReference: applyStageOperation(current.stageReference, operation),
+      }
+    })
+  }, [])
+
+  const sendStageEdit = useCallback((operation, options = {}) => {
+    if (!operation) return
+    updateLocalStageReference(operation)
+    if (options.preview) return
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setError('Room is reconnecting. Try the edit again in a moment.')
+      return
+    }
+    socket.send(JSON.stringify({
+      type: 'stage_edit',
+      operation,
+      stageReferenceVersion: selectedRoom?.stageReferenceVersion || 0,
+      worldId: selectedRoom?.worldId || roomId,
+      clientId: clientIdRef.current,
+      sentAt: new Date().toISOString(),
+    }))
+  }, [roomId, selectedRoom?.stageReferenceVersion, selectedRoom?.worldId, updateLocalStageReference])
+
+  const setEditorTool = useCallback((tool) => {
+    setActiveTool(tool)
+    const editor = editorRef.current
+    if (editor) editor.setCurrentTool(tool === 'draw' ? 'draw' : 'select')
+  }, [])
+
+  const addStagePlatform = useCallback((kind) => {
+    const editorId = `ipad-platform-${Date.now().toString(36)}`
+    const platform = { ...platformForKind(kind), editorId }
+    setActiveTool('edit')
+    setSelectedStageItem({ type: 'platform', id: editorId })
+    sendStageEdit({ type: 'add_platform', platform })
+  }, [sendStageEdit])
+
+  const addStagePortal = useCallback(() => {
+    const pair = portalPairAtCenter()
+    setActiveTool('edit')
+    setSelectedStageItem({ type: 'portal', id: pair.a.editorId })
+    sendStageEdit({ type: 'add_portal_pair', portalPair: pair })
+  }, [sendStageEdit])
+
+  const deleteSelectedStageItem = useCallback(() => {
+    if (!selectedStageItem) return
+    sendStageEdit({
+      type: selectedStageItem.type === 'portal' ? 'delete_portal_pair' : 'delete_platform',
+      targetId: selectedStageItem.id,
+    })
+    setSelectedStageItem(null)
+  }, [selectedStageItem, sendStageEdit])
+
   const tldrawComponents = useMemo(
     () => ({
       OnTheCanvas: () => (
         <>
-          <PlatformReferenceLayer stageReference={selectedRoom?.stageReference} />
+          <CanvasStageReferenceLayer stageReference={selectedRoom?.stageReference} />
           <SemanticCandidateLayer semanticDraft={semanticDraft} selectedCandidateId={selectedCandidateId} />
+          {activeTool === 'edit' ? (
+            <StageEditLayer
+              stageReference={selectedRoom?.stageReference}
+              selectedItem={selectedStageItem}
+              onSelectItem={setSelectedStageItem}
+              onCommitEdit={sendStageEdit}
+            />
+          ) : null}
         </>
       ),
     }),
-    [semanticDraft, selectedCandidateId, selectedRoom?.stageReference],
+    [activeTool, semanticDraft, selectedCandidateId, selectedRoom?.stageReference, selectedStageItem, sendStageEdit],
   )
 
   const handleJoinRoom = useCallback((nextRoomId, nextBackendUrl) => {
@@ -997,6 +1334,8 @@ export default function App() {
     setVisualObservation(null)
     setSelectedCandidateId(null)
     setSemanticError('')
+    setSelectedStageItem(null)
+    setActiveTool('draw')
     localHadUserContentRef.current = false
     userInteractedRef.current = false
     previousSourceIdsRef.current = new Set()
@@ -1133,6 +1472,10 @@ export default function App() {
         setRoomVersion(message.version ?? 0)
         setVisualObservation(message.visualObservation || null)
         if (message.semanticDraft) setSemanticDraft(message.semanticDraft)
+      } else if (message.type === 'stage_edit_updated') {
+        setStatus('connected')
+        setRoomVersion(message.version ?? 0)
+        mergeSelectedRoomContext(message)
       } else if (message.type === 'error') {
         setError(message.message || 'Backend rejected a message.')
         setSemanticError(message.message || 'Backend rejected a message.')
@@ -1238,7 +1581,15 @@ export default function App() {
       onPointerDownCapture={() => { userInteractedRef.current = true }}
       onKeyDownCapture={() => { userInteractedRef.current = true }}
     >
-      <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} />
+      <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} hideUi />
+      <EditorToolbar
+        tool={activeTool}
+        selectedItem={selectedStageItem}
+        onSetTool={setEditorTool}
+        onAddPlatform={addStagePlatform}
+        onAddPortal={addStagePortal}
+        onDelete={deleteSelectedStageItem}
+      />
       <aside className="editor-chrome" aria-label="Magic Board editor tools">
         <div className="editor-chrome-scroll">
           <DesktopSelectionPanel

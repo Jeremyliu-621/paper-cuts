@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
+from app import finishers as finishers_mod
 from app.main import app
 from app.finishers import reset_finisher_jobs
 from app.orchestrator import AgentOrchestrator
@@ -61,6 +62,10 @@ def finisher_payload(style: str = "Melt") -> dict:
     }
 
 
+async def noop_finisher_task(job_id: str) -> None:
+    return None
+
+
 def test_finisher_job_reports_missing_key(monkeypatch) -> None:
     monkeypatch.delenv("FAL_KEY", raising=False)
     client = TestClient(app)
@@ -75,6 +80,30 @@ def test_finisher_job_reports_missing_key(monkeypatch) -> None:
     assert body["error"] == "missing FAL_KEY"
 
 
+def test_finisher_job_accepts_doodle_keyframes_with_missing_key(monkeypatch) -> None:
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    client = TestClient(app)
+    payload = finisher_payload()
+    payload.update(
+        {
+            "sourceType": "doodle_keyframes",
+            "motionClipDataUrl": "data:video/webm;base64,AAAA",
+            "keyframeDataUrls": [
+                "data:image/png;base64,frame1",
+                "data:image/png;base64,frame2",
+                "data:image/png;base64,frame3",
+            ],
+            "motionSummary": {"durationMs": 1800, "maxWristSpeed": 1.4},
+            "skinHash": "skin-motion",
+        }
+    )
+
+    response = client.post("/finishers/jobs", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "missing_key"
+
+
 def test_finisher_job_rejects_invalid_style() -> None:
     client = TestClient(app)
 
@@ -85,6 +114,7 @@ def test_finisher_job_rejects_invalid_style() -> None:
 
 def test_finisher_job_creates_cached_local_record(monkeypatch) -> None:
     monkeypatch.setenv("FAL_KEY", "test-fal-key")
+    monkeypatch.setattr("app.finishers._run_finisher_job", noop_finisher_task)
 
     async def fake_submit(request):
         return {"request_id": "fal-123"}
@@ -103,9 +133,15 @@ def test_finisher_job_creates_cached_local_record(monkeypatch) -> None:
 
 def test_finisher_job_poll_transitions_to_ready(monkeypatch) -> None:
     monkeypatch.setenv("FAL_KEY", "test-fal-key")
+    monkeypatch.setattr("app.finishers._run_finisher_job", noop_finisher_task)
 
     async def fake_submit(request):
-        return {"request_id": "fal-ready"}
+        return {
+            "request_id": "fal-ready",
+            "status_url": "https://queue.example/status/fal-ready",
+            "response_url": "https://queue.example/result/fal-ready",
+            "model": "fal-ai/pika/v1.5/pikaffects",
+        }
 
     async def fake_status(job):
         return {"status": "COMPLETED"}
@@ -124,10 +160,14 @@ def test_finisher_job_poll_transitions_to_ready(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
     assert response.json()["videoUrl"] == "https://cdn.example/finisher.mp4"
+    job = finishers_mod._jobs[created["jobId"]]
+    assert job.status_url == "https://queue.example/status/fal-ready"
+    assert job.response_url == "https://queue.example/result/fal-ready"
 
 
 def test_finisher_job_poll_transitions_to_failed(monkeypatch) -> None:
     monkeypatch.setenv("FAL_KEY", "test-fal-key")
+    monkeypatch.setattr("app.finishers._run_finisher_job", noop_finisher_task)
 
     async def fake_submit(request):
         return {"request_id": "fal-fail"}
@@ -346,6 +386,41 @@ def test_websocket_capture_updates_room_and_http_capture() -> None:
             "sentAt": "2026-06-20T12:00:00.000Z",
         }
     ]
+
+
+def test_websocket_stage_edit_updates_room_reference_and_selection() -> None:
+    client = TestClient(app)
+    reference = stage_reference()
+    response = client.post(
+        "/selection/current",
+        json={"roomId": "stage-edit", "worldId": "world-stage-edit", "worldName": "Stage Edit", "stageReference": reference},
+    )
+    assert response.status_code == 200
+
+    with client.websocket_connect("/ws/rooms/stage-edit") as websocket:
+        hello = websocket.receive_json()
+        platform_id = hello["stageReference"]["platforms"][0].get("editorId") or "platform-0-100-860-440-42"
+        assert platform_id
+        websocket.send_json(
+            {
+                "type": "stage_edit",
+                "operation": {"type": "update_platform", "targetId": platform_id, "patch": {"x": 240, "y": 700}},
+                "stageReferenceVersion": hello["stageReferenceVersion"],
+                "worldId": "world-stage-edit",
+                "clientId": "ipad-editor",
+            }
+        )
+        update = websocket.receive_json()
+
+    assert update["type"] == "stage_edit_updated"
+    assert update["sourceClientId"] == "ipad-editor"
+    assert update["stageReferenceVersion"] == 2
+    assert update["stageReference"]["platforms"][0]["x"] == 240
+    assert update["stageReference"]["platforms"][0]["y"] == 700
+    room = client.get("/rooms/stage-edit/capture").json()
+    assert room["stageReference"]["platforms"][0]["x"] == 240
+    selection = client.get("/selection/current").json()
+    assert selection["stageReference"]["platforms"][0]["x"] == 240
 
 
 def test_new_connection_receives_latest_projection_in_hello() -> None:

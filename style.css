@@ -136,6 +136,21 @@ body{
 #countdown-overlay{z-index:32;padding:0;overflow:hidden;}
 .countdown-canvas{width:100%;height:100%;display:block;}
 
+#ultimate-recorder-overlay{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+  background:rgba(47,42,38,.42);padding:18px;}
+#ultimate-recorder-overlay[hidden]{display:none;}
+.ultimate-recorder-panel{background:var(--paper);border:var(--line) solid var(--ink);border-radius:14px 12px 15px 13px;
+  box-shadow:6px 8px 0 rgba(47,42,38,.24);padding:12px;width:min(608px,96vw);}
+.ultimate-recorder-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;}
+.ultimate-recorder-title{font-family:'Gloria Hallelujah',cursive;font-size:23px;}
+.ultimate-recorder-close,.ultimate-recorder-record{font-family:inherit;cursor:pointer;border:var(--line) solid var(--ink);
+  border-radius:10px;background:var(--paper);color:var(--ink);padding:3px 13px;font-size:17px;}
+.ultimate-recorder-record{background:var(--accent);color:var(--paper);}
+.ultimate-recorder-preview{display:block;width:100%;height:auto;aspect-ratio:4/3;border:3px solid var(--ink);
+  border-radius:8px;background:var(--paper-2);}
+.ultimate-recorder-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:9px;}
+.ultimate-recorder-status{font-size:15px;color:var(--ink-soft);text-align:right;}
+
 /* Level Preview */
 #level-preview-ui{
   position:absolute;
@@ -449,6 +464,13 @@ body{
 .lobby-draw{font-family:inherit;font-size:14px;cursor:pointer;border:2px dashed var(--ink-soft);
   border-radius:10px;background:var(--paper);color:var(--ink-soft);padding:3px 12px;}
 .lobby-draw:hover{border-style:solid;color:var(--ink);}
+.lobby-record{font-family:inherit;font-size:14px;cursor:pointer;border:2px solid var(--ink);
+  border-radius:10px;background:var(--paper);color:var(--ink);padding:3px 11px;}
+.lobby-record:hover{transform:translateY(-1px) rotate(-.5deg);}
+.lobby-record:disabled{cursor:default;opacity:.55;transform:none;border-style:dashed;}
+.lobby-ultimate-state{font-size:13px;color:var(--ink-soft);min-height:16px;line-height:1.15;}
+.lobby-ultimate-state.ready{color:#2f6fe0;}
+.lobby-ultimate-state.bad{color:#b3402a;}
 .page-card{width:min(960px,97vw);max-height:97vh;overflow:auto;text-align:center;}
 .menu-title{font-family:'Gloria Hallelujah',cursive;font-size:42px;text-align:center;margin:2px 0 4px;}
 .page-card h3{font-family:'Patrick Hand',cursive;font-size:18px;letter-spacing:3px;text-transform:uppercase;

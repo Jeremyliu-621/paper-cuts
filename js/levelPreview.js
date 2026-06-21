@@ -25,6 +25,7 @@
     activityTimer: 0,
     onActivity: null,
     onSemanticDraft: null,
+    onStageEdit: null,
     enterSeq: 0,
     selectionController: null,
   };
@@ -68,10 +69,78 @@
     return {
       view: { w: Math.max(1, bounds.x1 - bounds.x0), h: Math.max(1, bounds.y1 - bounds.y0), x: bounds.x0, y: bounds.y0 },
       bounds,
-      platforms: stage && Array.isArray(stage.platforms) ? DS.data.clone(stage.platforms) : [],
-      portals: stage && Array.isArray(stage.portals) ? DS.data.clone(stage.portals) : [],
+      platforms: addEditorIds(stage && Array.isArray(stage.platforms) ? DS.data.clone(stage.platforms) : [], 'platform'),
+      portals: addEditorIds(stage && Array.isArray(stage.portals) ? DS.data.clone(stage.portals) : [], 'portal'),
       spawns: stage && Array.isArray(stage.spawns) ? DS.data.clone(stage.spawns) : [],
+      decor: stage && Array.isArray(stage.decor) ? DS.data.clone(stage.decor) : [],
+      bg: stage && Array.isArray(stage.bg) ? DS.data.clone(stage.bg) : [],
     };
+  }
+
+  function itemEditorId(kind, item, index) {
+    if (!item) return '';
+    if (item.editorId || item.id) return String(item.editorId || item.id);
+    const source = item.source;
+    if (source && source.kind === 'magicboard_agent' && source.candidateId) return kind + '-candidate-' + source.candidateId;
+    if (kind === 'portal') return 'portal-' + index + '-' + Math.round(item.x || 0) + '-' + Math.round(item.y || 0) + '-' + Math.round(item.r || 0);
+    return 'platform-' + index + '-' + Math.round(item.x || 0) + '-' + Math.round(item.y || 0) + '-' + Math.round(item.w || 0) + '-' + Math.round(item.h || 0);
+  }
+
+  function addEditorIds(items, kind) {
+    return (items || []).map((item, index) => {
+      const copy = Object.assign({}, item);
+      if (!copy.editorId) copy.editorId = itemEditorId(kind, copy, index);
+      return copy;
+    });
+  }
+
+  function applyNumericPatch(target, patch, keys) {
+    keys.forEach((key) => {
+      if (Number.isFinite(patch[key])) target[key] = Math.round(patch[key]);
+    });
+  }
+
+  function applyStageEditToWorld(operation) {
+    const stage = stageForWorld();
+    if (!stage || !operation) return false;
+    const targetId = String(operation.targetId || '');
+    stage.platforms = stage.platforms || [];
+    stage.portals = stage.portals || [];
+    if (operation.type === 'add_platform') {
+      stage.platforms.push(DS.data.clone(operation.platform || {}));
+    } else if (operation.type === 'update_platform') {
+      const patch = operation.patch || {};
+      for (let i = 0; i < stage.platforms.length; i++) {
+        if (itemEditorId('platform', stage.platforms[i], i) === targetId) {
+          applyNumericPatch(stage.platforms[i], patch, ['x', 'y', 'w', 'h']);
+          break;
+        }
+      }
+    } else if (operation.type === 'delete_platform') {
+      stage.platforms = stage.platforms.filter((platform, index) => itemEditorId('platform', platform, index) !== targetId);
+    } else if (operation.type === 'add_portal_pair') {
+      const pair = operation.portalPair || {};
+      if (pair.a && pair.b) stage.portals.push(DS.data.clone(pair.a), DS.data.clone(pair.b));
+    } else if (operation.type === 'update_portal') {
+      const patch = operation.patch || {};
+      for (let i = 0; i < stage.portals.length; i++) {
+        if (itemEditorId('portal', stage.portals[i], i) === targetId) {
+          applyNumericPatch(stage.portals[i], patch, ['x', 'y', 'r']);
+          break;
+        }
+      }
+    } else if (operation.type === 'delete_portal_pair') {
+      let linked = null;
+      for (let i = 0; i < stage.portals.length; i++) {
+        const portal = stage.portals[i];
+        if (itemEditorId('portal', portal, i) === targetId) linked = new Set([portal.id, portal.link, portal.editorId].filter(Boolean).map(String));
+      }
+      if (linked) stage.portals = stage.portals.filter((portal) => ![portal.id, portal.link, portal.editorId].some((id) => linked.has(String(id))));
+    } else {
+      return false;
+    }
+    if (DS.Store && DS.Store.save) DS.Store.save();
+    return true;
   }
 
   function publishSelection(backendUrl, world, roomId) {
@@ -259,6 +328,12 @@
           message.visualObservation || state.visualObservation,
           null,
         );
+      } else if (message.type === 'stage_edit_updated') {
+        setStatus('connected');
+        applyStageEditToWorld(message.operation);
+        state.version = message.version || state.version;
+        if (state.onStageEdit) state.onStageEdit(state.world, message);
+        publishSelection(new URL(state.backendUrl), state.world, state.roomId);
       }
     });
 
@@ -306,6 +381,7 @@
     state.visualObservation = null;
     state.onActivity = options.onActivity || null;
     state.onSemanticDraft = options.onSemanticDraft || null;
+    state.onStageEdit = options.onStageEdit || null;
     syncUi();
     publishSelection(backend, world, state.roomId);
     if (saved) {
@@ -340,6 +416,7 @@
     state.semanticDraft = null;
     state.visualObservation = null;
     state.onSemanticDraft = null;
+    state.onStageEdit = null;
     syncUi();
     if (shouldClearSelection) clearSelection(backendUrl);
   }
