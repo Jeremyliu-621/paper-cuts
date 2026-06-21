@@ -8,7 +8,6 @@ from typing import Any
 from fastapi import WebSocket
 
 from .schemas import (
-    AgentError,
     AgentJobRequest,
     AgentJobResponse,
     AgentTurn,
@@ -23,9 +22,8 @@ from .schemas import (
     SemanticAnswer,
     SemanticDraft,
     SemanticDraftUpdatedMessage,
-    VoiceRoomStateUpdatedMessage,
-    VoiceSession,
-    VoiceTranscriptEvent,
+    StageEditMessage,
+    StageEditUpdatedMessage,
     VisualObservation,
     VisualObservationUpdatedMessage,
 )
@@ -33,6 +31,128 @@ from .agent_runtime import initial_visual_observation, make_stub_job, stale_visu
 from .semantic import bind_answer, build_semantic_draft
 
 MAX_RECENT_EVENTS = 20
+
+
+def _clone_dict(value: dict[str, Any] | None) -> dict[str, Any]:
+    import copy
+
+    return copy.deepcopy(value or {})
+
+
+def _stage_item_id(kind: str, item: dict[str, Any], index: int) -> str:
+    explicit = item.get("editorId") or item.get("id")
+    if explicit:
+        return str(explicit)
+    source = item.get("source") if isinstance(item.get("source"), dict) else None
+    if source and source.get("candidateId"):
+        return f"{kind}-candidate-{source['candidateId']}"
+    if kind == "portal":
+        return f"portal-{index}-{round(float(item.get('x', 0)))}-{round(float(item.get('y', 0)))}-{round(float(item.get('r', 0)))}"
+    return (
+        f"platform-{index}-{round(float(item.get('x', 0)))}-{round(float(item.get('y', 0)))}-"
+        f"{round(float(item.get('w', 0)))}-{round(float(item.get('h', 0)))}"
+    )
+
+
+def _with_editor_ids(stage_reference: dict[str, Any]) -> dict[str, Any]:
+    for kind, key in (("platform", "platforms"), ("portal", "portals")):
+        items = stage_reference.get(key)
+        if not isinstance(items, list):
+            stage_reference[key] = []
+            continue
+        for index, item in enumerate(items):
+            if isinstance(item, dict) and not item.get("editorId"):
+                item["editorId"] = _stage_item_id(kind, item, index)
+    return stage_reference
+
+
+def _finite_number(value: Any, fallback: float) -> float:
+    return value if isinstance(value, (int, float)) and value == value else fallback
+
+
+def _apply_patch_to_item(item: dict[str, Any], patch: dict[str, Any], allowed: set[str]) -> None:
+    for key, value in patch.items():
+        if key in allowed and isinstance(value, (int, float)) and value == value:
+            item[key] = round(value)
+
+
+def _apply_stage_edit(stage_reference: dict[str, Any] | None, operation: dict[str, Any]) -> dict[str, Any]:
+    reference = _with_editor_ids(_clone_dict(stage_reference))
+    reference.setdefault("view", {"w": 1920, "h": 1080})
+    reference.setdefault("platforms", [])
+    reference.setdefault("portals", [])
+    reference.setdefault("spawns", [])
+    reference.setdefault("decor", [])
+
+    op_type = operation.get("type")
+    target_id = str(operation.get("targetId") or "")
+    platforms = reference["platforms"]
+    portals = reference["portals"]
+
+    if op_type == "add_platform":
+        platform = _clone_dict(operation.get("platform") if isinstance(operation.get("platform"), dict) else {})
+        platform.setdefault("x", 760)
+        platform.setdefault("y", 720)
+        platform.setdefault("w", 300)
+        platform.setdefault("h", 40)
+        platform.setdefault("kind", "wood")
+        platform.setdefault("pass", True)
+        platform.setdefault("editorId", f"platform-ipad-{datetime.now(UTC).timestamp():.6f}")
+        platforms.append(platform)
+    elif op_type == "update_platform":
+        patch = operation.get("patch") if isinstance(operation.get("patch"), dict) else {}
+        for index, platform in enumerate(platforms):
+            if isinstance(platform, dict) and _stage_item_id("platform", platform, index) == target_id:
+                _apply_patch_to_item(platform, patch, {"x", "y", "w", "h"})
+                break
+    elif op_type == "delete_platform":
+        reference["platforms"] = [
+            platform
+            for index, platform in enumerate(platforms)
+            if not isinstance(platform, dict) or _stage_item_id("platform", platform, index) != target_id
+        ]
+    elif op_type == "add_portal_pair":
+        pair = operation.get("portalPair") if isinstance(operation.get("portalPair"), dict) else {}
+        a = _clone_dict(pair.get("a") if isinstance(pair.get("a"), dict) else {})
+        b = _clone_dict(pair.get("b") if isinstance(pair.get("b"), dict) else {})
+        stamp = f"ipad-{datetime.now(UTC).timestamp():.6f}"
+        a.setdefault("id", f"{stamp}-a")
+        b.setdefault("id", f"{stamp}-b")
+        a.setdefault("link", b["id"])
+        b.setdefault("link", a["id"])
+        a.setdefault("editorId", a["id"])
+        b.setdefault("editorId", b["id"])
+        a.setdefault("x", 700)
+        a.setdefault("y", 600)
+        b.setdefault("x", 1220)
+        b.setdefault("y", 600)
+        a.setdefault("r", 74)
+        b.setdefault("r", 74)
+        a.setdefault("col", "#3f6fa0")
+        b.setdefault("col", a["col"])
+        portals.extend([a, b])
+    elif op_type == "update_portal":
+        patch = operation.get("patch") if isinstance(operation.get("patch"), dict) else {}
+        for index, portal in enumerate(portals):
+            if isinstance(portal, dict) and _stage_item_id("portal", portal, index) == target_id:
+                _apply_patch_to_item(portal, patch, {"x", "y", "r"})
+                break
+    elif op_type == "delete_portal_pair":
+        linked_ids: set[str] = set()
+        for index, portal in enumerate(portals):
+            if isinstance(portal, dict) and _stage_item_id("portal", portal, index) == target_id:
+                linked_ids.update(str(value) for value in (portal.get("id"), portal.get("link"), portal.get("editorId")) if value)
+                break
+        reference["portals"] = [
+            portal
+            for portal in portals
+            if not isinstance(portal, dict)
+            or not ({str(value) for value in (portal.get("id"), portal.get("link"), portal.get("editorId")) if value} & linked_ids)
+        ]
+    else:
+        raise ValueError("unsupported stage edit operation")
+
+    return _with_editor_ids(reference)
 
 
 def selection_payload(selection: RoomSelectionResponse) -> dict[str, Any]:
@@ -52,8 +172,6 @@ class RoomState:
     visual_observation: VisualObservation | None = None
     semantic_answers: list[SemanticAnswer] = field(default_factory=list)
     agent_jobs: dict[str, AgentJobResponse] = field(default_factory=dict)
-    voice_sessions: dict[str, VoiceSession] = field(default_factory=dict)
-    voice_events: list[VoiceTranscriptEvent] = field(default_factory=list)
     agent_turns: list[AgentTurn] = field(default_factory=list)
     semantic_objects: list[dict[str, Any]] = field(default_factory=list)
     proposals: dict[str, LevelEditProposal] = field(default_factory=dict)
@@ -86,8 +204,6 @@ class RoomRegistry:
             projection=room.projection,
             semanticDraft=room.semantic_draft,
             visualObservation=room.visual_observation,
-            voiceSessions=list(room.voice_sessions.values()),
-            voiceEvents=room.voice_events[-20:],
             agentTurns=room.agent_turns[-10:],
             proposals=list(room.proposals.values()),
             permissionRequests=list(room.permission_requests.values()),
@@ -200,9 +316,38 @@ class RoomRegistry:
             projection=message.projection,
             semanticDraft=room.semantic_draft,
             visualObservation=room.visual_observation,
-            voiceSessions=list(room.voice_sessions.values()),
             proposals=list(room.proposals.values()),
             permissionRequests=list(room.permission_requests.values()),
+            stageReference=room.stage_reference,
+            stageReferenceVersion=room.stage_reference_version,
+            sourceClientId=message.client_id,
+        )
+
+    def store_stage_edit(self, room_id: str, message: StageEditMessage) -> StageEditUpdatedMessage:
+        room = self.get_room(room_id)
+        room.version += 1
+        room.stage_reference = _apply_stage_edit(room.stage_reference, message.operation)
+        room.stage_reference_version += 1
+        room.world_id = message.world_id or room.world_id or (
+            self._selection.world_id if self._selection.room_id == room_id else None
+        )
+        room.updated_at = datetime.now(UTC)
+        if self._selection.room_id == room_id:
+            self._selection = self._selection.model_copy(
+                update={
+                    "world_id": room.world_id,
+                    "stage_reference": room.stage_reference,
+                    "stage_reference_version": room.stage_reference_version,
+                    "selected_at": room.updated_at,
+                }
+            )
+        return StageEditUpdatedMessage(
+            roomId=room.room_id,
+            version=room.version,
+            stageReference=room.stage_reference,
+            stageReferenceVersion=room.stage_reference_version,
+            operation=message.operation,
+            worldId=room.world_id,
             sourceClientId=message.client_id,
         )
 
@@ -215,94 +360,6 @@ class RoomRegistry:
     def _stable_id(self, prefix: str, *parts: object) -> str:
         raw = "|".join(str(part) for part in parts) + "|" + datetime.now(UTC).isoformat()
         return prefix + "-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
-
-    def voice_room_update(self, room_id: str) -> VoiceRoomStateUpdatedMessage:
-        room = self.get_room(room_id)
-        return VoiceRoomStateUpdatedMessage(
-            roomId=room.room_id,
-            version=room.version,
-            voiceSessions=list(room.voice_sessions.values()),
-            voiceEvents=room.voice_events[-20:],
-            agentTurns=room.agent_turns[-10:],
-            proposals=list(room.proposals.values()),
-            permissionRequests=list(room.permission_requests.values()),
-        )
-
-    def active_voice_sessions(self, room_id: str) -> list[VoiceSession]:
-        room = self.get_room(room_id)
-        return [session for session in room.voice_sessions.values() if session.status not in {"ended", "error"}]
-
-    def create_voice_session(
-        self,
-        room_id: str,
-        *,
-        client_id: str | None = None,
-        world_id: str | None = None,
-        end_other_active: bool = False,
-    ) -> VoiceSession:
-        room = self.get_room(room_id)
-        now = datetime.now(UTC)
-        if end_other_active:
-            for session in self.active_voice_sessions(room_id):
-                room.voice_sessions[session.session_id] = session.model_copy(
-                    update={"status": "ended", "ended_at": now, "updated_at": now}
-                )
-        session = VoiceSession(
-            sessionId=self._stable_id("voice", room_id, client_id or ""),
-            roomId=room_id,
-            worldId=world_id or room.world_id,
-            status="starting",
-            createdAt=now,
-            updatedAt=now,
-            captureVersion=room.version,
-            semanticDraftVersion=room.semantic_draft.version if room.semantic_draft else 0,
-            stageReferenceVersion=room.stage_reference_version,
-            clientId=client_id,
-            permissions=[],
-        )
-        room.voice_sessions[session.session_id] = session
-        return session
-
-    def get_voice_session(self, room_id: str, session_id: str) -> VoiceSession | None:
-        return self.get_room(room_id).voice_sessions.get(session_id)
-
-    def update_voice_session(
-        self,
-        room_id: str,
-        session_id: str,
-        *,
-        status: str | None = None,
-        error: AgentError | None = None,
-        ended: bool = False,
-    ) -> VoiceSession | None:
-        room = self.get_room(room_id)
-        session = room.voice_sessions.get(session_id)
-        if session is None:
-            return None
-        now = datetime.now(UTC)
-        update: dict[str, Any] = {"updated_at": now}
-        if status is not None:
-            update["status"] = status
-        if error is not None:
-            update["error"] = error
-        if ended:
-            update["status"] = "ended" if error is None else "error"
-            update["ended_at"] = now
-        session = session.model_copy(update=update)
-        room.voice_sessions[session_id] = session
-        return session
-
-    def append_voice_event(self, room_id: str, event: VoiceTranscriptEvent) -> VoiceTranscriptEvent:
-        room = self.get_room(room_id)
-        room.voice_events.append(event)
-        room.voice_events = room.voice_events[-100:]
-        return event
-
-    def voice_events_for_session(self, room_id: str, session_id: str | None = None) -> list[VoiceTranscriptEvent]:
-        events = self.get_room(room_id).voice_events
-        if session_id:
-            return [event for event in events if event.session_id == session_id]
-        return list(events)
 
     def upsert_agent_turn(self, room_id: str, turn: AgentTurn) -> AgentTurn:
         room = self.get_room(room_id)
@@ -462,9 +519,9 @@ class RoomRegistry:
         for websocket in stale:
             self.disconnect(room_id, websocket)
 
-    async def broadcast_voice_state(self, room_id: str) -> None:
+    async def broadcast_stage_edit(self, room_id: str, update: StageEditUpdatedMessage) -> None:
         stale: list[WebSocket] = []
-        payload = self.voice_room_update(room_id).model_dump(mode="json", by_alias=True)
+        payload = update.model_dump(mode="json", by_alias=True)
         for websocket in list(self._connections.get(room_id, set())):
             try:
                 await websocket.send_json(payload)

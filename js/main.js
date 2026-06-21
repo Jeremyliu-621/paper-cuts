@@ -46,7 +46,6 @@
     setActiveTab('');
     setPreviewSaveState('Save', false);
     setPreviewApplyState('Auto Apply', true);
-    setPreviewRejectState('Reject Proposal', true);
     DS.LevelPreview.enter(world, {
       onActivity(activeWorld, activity) {
         if (!activeWorld || !worldLibrary) return;
@@ -56,6 +55,12 @@
       },
       onSemanticDraft(activeWorld, draft) {
         autoApplyLevelPreviewSemanticDraft(activeWorld, draft);
+      },
+      onStageEdit(activeWorld) {
+        if (!activeWorld) return;
+        const updated = syncWorldFromStage(activeWorld, activeWorld.mapId || activeWorld.id || 'meadow');
+        if (updated && DS.LevelPreview && DS.LevelPreview.state) DS.LevelPreview.state.world = updated;
+        if (game.mapId === (activeWorld.mapId || activeWorld.id)) game.rebuild();
       },
     });
   }
@@ -85,13 +90,6 @@
 
   function setPreviewApplyState(label, disabled) {
     const button = document.getElementById('level-preview-apply');
-    if (!button) return;
-    button.textContent = label;
-    button.disabled = !!disabled;
-  }
-
-  function setPreviewRejectState(label, disabled) {
-    const button = document.getElementById('level-preview-reject');
     if (!button) return;
     button.textContent = label;
     button.disabled = !!disabled;
@@ -133,24 +131,6 @@
     if (!activeWorld) return;
     setPreviewApplyState('Applying...', true);
     try {
-      const activeProposal = DS.LevelPreview.activeProposal && DS.LevelPreview.activeProposal();
-      if (activeProposal && activeProposal.approvalState === 'pending_approval') {
-        const proposal = await DS.LevelPreview.resolveActiveProposal(true);
-        const mapId = activeWorld.mapId || 'meadow';
-        const result = DS.MagicBoardGame.applyPatch(proposal.patch, {
-          rebuild() {
-            game.mapId = mapId;
-            game.rebuild();
-          },
-        });
-        if (!result.ok) throw new Error(result.errors.join('; '));
-        await DS.LevelPreview.markActiveProposalApplied(proposal.proposalId);
-        const updated = syncWorldFromStage(activeWorld, mapId);
-        if (updated) DS.LevelPreview.state.world = updated;
-        setPreviewApplyState('Applied', true);
-        window.setTimeout(() => setPreviewApplyState('Auto Apply', true), 1400);
-        return;
-      }
       let draft = DS.LevelPreview.state.semanticDraft;
       if (!draft) {
         const room = await DS.LevelPreview.saveCapture();
@@ -183,19 +163,6 @@
     }
   }
 
-  async function rejectLevelPreviewProposal() {
-    if (!DS.LevelPreview) return;
-    setPreviewRejectState('Rejecting...', true);
-    try {
-      await DS.LevelPreview.resolveActiveProposal(false);
-      setPreviewRejectState('Rejected', true);
-      window.setTimeout(() => setPreviewRejectState('Reject Proposal', false), 1200);
-    } catch (error) {
-      console.warn('proposal reject failed', error);
-      setPreviewRejectState('Reject failed', false);
-    }
-  }
-
   function playActivePreviewWorld() {
     if (!DS.LevelPreview || !worldLibrary) return;
     const activeWorld = DS.LevelPreview.state && DS.LevelPreview.state.world;
@@ -209,9 +176,11 @@
     exitLevelPreview();
     game.modeId = activeWorld.modeId || 'smash';
     game.mapId = mapId;
-    document.querySelector('.tab[data-tab="play"]').click();
     game.rebuild();
-    game.start();
+    selMode = game.modeId;
+    selMap = game.mapId;
+    document.querySelector('.tab[data-tab="play"]').click();
+    openMenu();
   }
 
   const autoAppliedKeys = new Set();
@@ -298,9 +267,11 @@
       if (worldLibrary && worldLibrary.ensureWorldStage) worldLibrary.ensureWorldStage(world);
       game.modeId = world.modeId || 'smash';
       game.mapId = world.mapId || world.id || 'meadow';
+      selMode = game.modeId;
+      selMap = game.mapId;
       document.querySelector('.tab[data-tab="play"]').click();
       game.rebuild();
-      game.start();
+      openMenu();
     },
   });
 
@@ -338,14 +309,17 @@
   const countdownOverlay = document.getElementById('countdown-overlay');
   const countdownCanvas = document.getElementById('countdown-canvas');
   let selMode = game.modeId || 'smash';
-  let selMap = game.mapId || 'meadow';
-  let ults = [], ready = [], cd = null; // cd = active countdown state (null when idle)
+  let selMap = game.mapId || 'demo';
+  let ults = [], ready = [], ultimateJobs = [], cd = null; // cd = active countdown state (null when idle)
   let playerSkins = [], drawIndex = -1, drawing = null, drawHist = [];
   const drawOverlay = document.getElementById('draw-overlay');
   const drawCanvas = document.getElementById('draw-canvas');
   const drawTitle = document.getElementById('draw-title');
   const ULTS = [{ id: 'hammer', name: 'Hammer' }, { id: 'sniper', name: 'Sniper' }, { id: 'werewolf', name: 'Werewolf' }];
   const mkEl = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  if (DS.UltimateRecorder) {
+    DS.UltimateRecorder.onChange = () => { if (!lobby.hidden) buildLobbyCols(); };
+  }
 
   // ---- doodle icons ----
   function paintCanvas(cv, lw, lh, fn) {
@@ -418,7 +392,13 @@
   // ---- setup page ----
   function buildSetup() {
     menuModes.innerHTML = ''; DS.Modes.list().forEach((m) => menuModes.appendChild(iconCard('mode', m.id, m.name, selMode === m.id, () => { selMode = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
-    menuMaps.innerHTML = ''; DS.Maps.list().forEach((m) => menuMaps.appendChild(iconCard('map', m.id, m.name, selMap === m.id, () => { selMap = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
+    menuMaps.innerHTML = '';
+    const maps = DS.Maps.list().slice();
+    if (selMap && !maps.some((m) => m.id === selMap)) {
+      const custom = DS.Maps.get(selMap);
+      maps.unshift({ id: selMap, name: (custom && custom.name) || 'Custom Level' });
+    }
+    maps.forEach((m) => menuMaps.appendChild(iconCard('map', m.id, m.name, selMap === m.id, () => { selMap = m.id; if (DS.Audio) DS.Audio.play('ui_move'); buildSetup(); })));
   }
   function openMenu() {
     if (worldLibrary) worldLibrary.close();
@@ -430,13 +410,90 @@
 
   // ---- lobby page ----
   function drawCharPreview(ctx, i, w, h) {
-    const d = game.data, name = i < d.roster.length ? d.roster[i] : d.roster[0];
-    let ch = d.characters[name];
-    const sk = playerSkins[i];
-    if (sk && sk.enabled) { ch = DS.data.clone(ch); ch.skin = sk; } // show the player's own drawing
+    const ch = lobbyCharacter(i);
     ctx.save(); ctx.translate(w / 2, h / 2 + 28);
     DS.character.drawFighter(ctx, ch, ch.actions.idle.pose, { facing: 1, seed: i * 1009 + 7 });
     ctx.restore();
+  }
+  function lobbyCharacterId(i) {
+    const d = game.data;
+    return i < d.roster.length ? d.roster[i] : d.roster[0];
+  }
+  function lobbyCharacter(i) {
+    const d = game.data, name = lobbyCharacterId(i);
+    let ch = d.characters[name];
+    const sk = playerSkins[i];
+    if (sk && sk.enabled) { ch = DS.data.clone(ch); ch.skin = sk; }
+    return ch;
+  }
+  function ultimateStyle(i) {
+    return ults[i] === 'sniper' ? 'Dissolve' : ults[i] === 'werewolf' ? 'Tear' : 'Squish';
+  }
+  function ultimateState(i) {
+    const st = DS.UltimateRecorder && DS.UltimateRecorder.getState ? DS.UltimateRecorder.getState(i) : { state: 'camera needed' };
+    const ch = lobbyCharacter(i);
+    const finisher = DS.Finishers && ch && DS.Finishers.ensure ? DS.Finishers.ensure(ch) : null;
+    const custom = finisher && finisher.customUltimates && finisher.customUltimates[String(i)];
+    if (custom && custom.armed && custom.videoUrl) return { label: 'custom ultimate ready', cls: 'ready' };
+    if (ultimateJobs[i] && ultimateJobs[i].status === 'ready') return { label: 'custom ultimate ready', cls: 'ready' };
+    if (ultimateJobs[i] && ultimateJobs[i].status === 'missing_key') return { label: 'using default', cls: '' };
+    if (ultimateJobs[i] && ultimateJobs[i].status === 'failed') return { label: 'failed', cls: 'bad' };
+    const label = st && st.state ? st.state : 'camera needed';
+    return { label, cls: label === 'failed' ? 'bad' : label === 'custom ultimate ready' ? 'ready' : '' };
+  }
+  async function recordUltimate(i) {
+    if (!DS.UltimateRecorder || !DS.Finishers) return;
+    const characterId = lobbyCharacterId(i);
+    const ch = lobbyCharacter(i);
+    const skinHash = DS.Finishers.victimSkinHash('P' + (i + 1), ch);
+    DS.UltimateRecorder.configurePlayer(i, { character: ch, facing: i === 1 ? -1 : 1 });
+    try {
+      const cameraReady = await DS.UltimateRecorder.startCamera(i);
+      if (!cameraReady) return;
+      const motionClipDataUrl = await DS.UltimateRecorder.startRecording(i);
+      if (!motionClipDataUrl) return;
+      const keyframeDataUrls = DS.UltimateRecorder.getKeyframes();
+      const motionSummary = DS.UltimateRecorder.getMotionSummary();
+      DS.UltimateRecorder.hide();
+      const result = await DS.Finishers.generateCustomUltimate(i, characterId, {
+        style: ultimateStyle(i),
+        skinHash,
+        imageDataUrl: DS.Finishers.renderCharacterDataUrl(ch),
+        motionClipDataUrl,
+        keyframeDataUrls,
+        motionSummary,
+      });
+      ultimateJobs[i] = { characterId, key: result.key, status: result.job.status, jobId: result.job.jobId };
+      applyUltimateJobState(i, result.job);
+      if (result.job.status === 'queued' || result.job.status === 'generating') pollUltimateJob(i, characterId, result.key);
+    } catch (error) {
+      DS.UltimateRecorder.setJobState(i, 'using default', error && error.message ? error.message : 'record failed');
+    } finally {
+      if (!lobby.hidden) buildLobbyCols();
+    }
+  }
+  function applyUltimateJobState(i, job) {
+    if (!DS.UltimateRecorder || !job) return;
+    if (!ultimateJobs[i]) ultimateJobs[i] = {};
+    ultimateJobs[i].status = job.status;
+    if (job.status === 'ready') DS.UltimateRecorder.setJobState(i, 'custom ultimate ready');
+    else if (job.status === 'missing_key') DS.UltimateRecorder.setJobState(i, 'using default');
+    else if (job.status === 'failed') DS.UltimateRecorder.setJobState(i, 'failed', job.error || 'generation failed');
+    else DS.UltimateRecorder.setJobState(i, 'generating');
+  }
+  function pollUltimateJob(i, characterId, key) {
+    if (!DS.Finishers || !key) return;
+    setTimeout(async () => {
+      try {
+        const job = await DS.Finishers.refresh(characterId, key);
+        applyUltimateJobState(i, job);
+        if (job.status === 'queued' || job.status === 'generating') pollUltimateJob(i, characterId, key);
+      } catch (error) {
+        if (DS.UltimateRecorder) DS.UltimateRecorder.setJobState(i, 'failed', error && error.message ? error.message : 'poll failed');
+      } finally {
+        if (!lobby.hidden) buildLobbyCols();
+      }
+    }, 2200);
   }
   function lobbyColumn(i) {
     const onPhone = DS.Net.hasPlayer(i + 1);   // a phone owns this slot → host shows it read-only
@@ -461,6 +518,12 @@
     // keyboard slot (no phone) — the host drives draw / ult / ready as before
     const db = mkEl('button', 'lobby-draw', (playerSkins[i] && playerSkins[i].enabled) ? '✎ Redraw' : '✎ Draw');
     db.onclick = () => openDraw(i); col.appendChild(db);
+    const recState = ultimateState(i);
+    const rec = mkEl('button', 'lobby-record', 'Record Ultimate');
+    rec.disabled = recState.label === 'recording' || recState.label === 'generating';
+    rec.onclick = () => recordUltimate(i);
+    col.appendChild(rec);
+    col.appendChild(mkEl('div', 'lobby-ultimate-state' + (recState.cls ? ' ' + recState.cls : ''), recState.label));
     const ur = mkEl('div', 'lobby-ults');
     ULTS.forEach((u) => {
       const ub = mkEl('button', 'lobby-ult' + (ults[i] === u.id ? ' sel' : '')); const c2 = document.createElement('canvas');
@@ -503,7 +566,7 @@
         if (ready[i] == null) ready[i] = false;
       }
     }
-    ults.length = n; ready.length = n; renderLobbyTop(); buildLobbyCols();
+    ults.length = n; ready.length = n; ultimateJobs.length = n; renderLobbyTop(); buildLobbyCols();
   }
   function openLobby() {
     menu.hidden = true; ults = []; ready = [];
@@ -747,18 +810,9 @@
     if (DS.Audio) DS.Audio.play('ui_confirm');
     applyLevelPreviewSemanticDraft();
   };
-  document.getElementById('level-preview-reject').onclick = () => {
-    if (DS.Audio) DS.Audio.play('ui_back');
-    rejectLevelPreviewProposal();
-  };
   document.getElementById('level-preview-play').onclick = () => {
     if (DS.Audio) DS.Audio.play('ui_confirm');
     playActivePreviewWorld();
-  };
-  document.getElementById('level-preview-mic').onclick = () => {
-    if (DS.Audio) DS.Audio.play('ui_confirm');
-    if (DS.LevelPreview && DS.LevelPreview.state && DS.LevelPreview.state.mediaRecorder) DS.LevelPreview.stopVoiceSession();
-    else if (DS.LevelPreview) DS.LevelPreview.startVoiceSession();
   };
   document.getElementById('level-preview-save').onclick = () => {
     if (DS.Audio) DS.Audio.play('ui_confirm');
@@ -1198,7 +1252,7 @@
     } catch (e) {
       window.__showErr('MAPS: ERR ' + e.message + ' | ' + out.join(' ') + '  FAIL');
     }
-    game.mapId = 'meadow'; game.rebuild(); game.state = 'paused';
+    game.mapId = 'demo'; game.rebuild(); game.state = 'paused';
   }
 
   // dev visual: load a specific map for a screenshot, e.g. #mapshow=cannons

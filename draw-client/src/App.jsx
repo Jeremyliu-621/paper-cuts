@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import '../../js/rng.js'
+import '../../js/draw.js'
+import '../../js/stage.js'
 import {
   Tldraw,
   createShapeId,
@@ -14,7 +17,7 @@ const SYNC_DEBOUNCE_MS = 120
 const RECONNECT_DELAY_MS = 1000
 const GAME_FRAME = { x: 0, y: 0, w: 1920, h: 1080 }
 const FRAME_SHAPE_ID = createShapeId('magicboard-stage-frame')
-const EMPTY_STAGE_REFERENCE = { view: { w: GAME_FRAME.w, h: GAME_FRAME.h }, platforms: [], portals: [], spawns: [] }
+const EMPTY_STAGE_REFERENCE = { view: { w: GAME_FRAME.w, h: GAME_FRAME.h }, platforms: [], portals: [], spawns: [], decor: [] }
 
 const SIZE_TO_WIDTH = {
   s: 3,
@@ -38,11 +41,7 @@ const COLOR_TO_HEX = {
   pink: '#d46aa4',
 }
 
-function getBackendUrl() {
-  const params = new URLSearchParams(window.location.search)
-  const configuredUrl = params.get('backend') || import.meta.env.VITE_BACKEND_URL
-  if (configuredUrl) return configuredUrl
-
+function inferredBackendUrlFromPage() {
   const url = new URL(window.location.href)
   url.port = DEFAULT_BACKEND_PORT
   url.pathname = '/'
@@ -51,12 +50,73 @@ function getBackendUrl() {
   return url.toString()
 }
 
-function normalizeBackendUrl(rawUrl) {
+function isLocalHost(hostname) {
+  return hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname === '::1'
+    || hostname === '[::1]'
+}
+
+function shouldUseConfiguredBackend(configuredUrl) {
+  if (!configuredUrl) return false
+  const pageHostIsLocal = isLocalHost(window.location.hostname)
+  if (pageHostIsLocal) return true
+
   try {
-    return new URL(rawUrl)
+    return !isLocalHost(new URL(configuredUrl).hostname)
   } catch (_error) {
-    return new URL(`http://localhost:${DEFAULT_BACKEND_PORT}`)
+    return false
   }
+}
+
+function getBackendUrl() {
+  const params = new URLSearchParams(window.location.search)
+  const urlBackend = params.get('backend')
+  if (urlBackend) return urlBackend
+
+  const configuredUrl = import.meta.env.VITE_BACKEND_URL
+  if (shouldUseConfiguredBackend(configuredUrl)) return configuredUrl
+
+  return inferredBackendUrlFromPage()
+}
+
+function normalizeBackendUrl(rawUrl) {
+  const candidate = `${rawUrl || ''}`.trim()
+  try {
+    return new URL(candidate)
+  } catch (_error) {
+    try {
+      return new URL(`http://${candidate}`)
+    } catch (_fallbackError) {
+      return new URL(`http://localhost:${DEFAULT_BACKEND_PORT}`)
+    }
+  }
+}
+
+function backendUrlInputValue(backendUrl) {
+  return backendUrl.toString().replace(/\/$/, '')
+}
+
+function normalizeRoomCode(rawRoomCode) {
+  return rawRoomCode
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+function healthUrlForBackend(backendUrl) {
+  const url = new URL(backendUrl)
+  url.pathname = '/health'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function backendUnreachableMessage(backendUrl) {
+  return `Could not reach ${backendUrl}. Check the Mac IP, Wi-Fi, backend server, or firewall.`
 }
 
 function websocketUrlForRoom(backendUrl, roomId) {
@@ -92,35 +152,57 @@ function visualObservationUrlForRoom(backendUrl, roomId) {
   return url.toString()
 }
 
-function voiceSessionsUrlForRoom(backendUrl, roomId) {
-  const url = new URL(backendUrl)
-  url.pathname = `/rooms/${encodeURIComponent(roomId)}/voice/sessions`
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
-function voiceSessionUrlForRoom(backendUrl, roomId, sessionId) {
-  const url = new URL(backendUrl)
-  url.pathname = `/rooms/${encodeURIComponent(roomId)}/voice/sessions/${encodeURIComponent(sessionId)}`
-  url.search = ''
-  url.hash = ''
-  return url.toString()
-}
-
-function voiceWsUrlForRoom(backendUrl, roomId, sessionId) {
-  const url = new URL(backendUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = `/ws/rooms/${encodeURIComponent(roomId)}/voice/${encodeURIComponent(sessionId)}`
-  url.search = ''
-  url.hash = ''
-  return url.toString()
+function applyStageOperation(stageReference, operation) {
+  const reference = {
+    ...(stageReference || EMPTY_STAGE_REFERENCE),
+    platforms: cloneArray(stageReference?.platforms),
+    portals: cloneArray(stageReference?.portals),
+    spawns: cloneArray(stageReference?.spawns),
+    decor: cloneArray(stageReference?.decor),
+    bg: cloneArray(stageReference?.bg),
+  }
+  const targetId = String(operation?.targetId || '')
+  if (operation?.type === 'add_platform') {
+    reference.platforms.push({ ...operation.platform })
+  } else if (operation?.type === 'update_platform') {
+    reference.platforms = reference.platforms.map((platform, index) => {
+      if (itemEditorId('platform', platform, index) !== targetId) return platform
+      return { ...platform, ...(operation.patch || {}) }
+    })
+  } else if (operation?.type === 'delete_platform') {
+    reference.platforms = reference.platforms.filter((platform, index) => itemEditorId('platform', platform, index) !== targetId)
+  } else if (operation?.type === 'add_portal_pair') {
+    const pair = operation.portalPair || {}
+    if (pair.a && pair.b) reference.portals.push({ ...pair.a }, { ...pair.b })
+  } else if (operation?.type === 'update_portal') {
+    reference.portals = reference.portals.map((portal, index) => {
+      if (itemEditorId('portal', portal, index) !== targetId) return portal
+      return { ...portal, ...(operation.patch || {}) }
+    })
+  } else if (operation?.type === 'delete_portal_pair') {
+    let linkedIds = new Set()
+    reference.portals.forEach((portal, index) => {
+      if (itemEditorId('portal', portal, index) === targetId) {
+        linkedIds = new Set([portal.id, portal.link, portal.editorId].filter(Boolean).map(String))
+      }
+    })
+    reference.portals = reference.portals.filter((portal) => ![portal.id, portal.link, portal.editorId].some((id) => linkedIds.has(String(id))))
+  }
+  return reference
 }
 
 function selectionWsUrlForBackend(backendUrl) {
   const url = new URL(backendUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   url.pathname = '/ws/selection'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function selectionCurrentUrlForBackend(backendUrl) {
+  const url = new URL(backendUrl)
+  url.pathname = '/selection/current'
   url.search = ''
   url.hash = ''
   return url.toString()
@@ -135,6 +217,19 @@ function roomSelectionFromUrl() {
     worldId: params.get('world') || roomId,
     worldName: params.get('worldName') || null,
   }
+}
+
+function hasStageReference(stageReference) {
+  return !!(
+    stageReference
+    && (
+      stageReference.view
+      || stageReference.bounds
+      || stageReference.platforms?.length
+      || stageReference.portals?.length
+      || stageReference.spawns?.length
+    )
+  )
 }
 
 function createClientId() {
@@ -263,6 +358,78 @@ function visualObservationLabel(observation) {
   return 'error'
 }
 
+function candidateQueueState(candidate, observation) {
+  if (candidate.status === 'confirmed' && candidate.answer?.classifier === 'vlm') return 'passed'
+  if (candidate.status === 'confirmed') return 'resolved'
+  if (candidate.status === 'decor' || candidate.status === 'ignored') return 'resolved'
+  if (candidate.status !== 'needs_answer') return candidate.status || 'queued'
+  if (!observation || observation.captureVersion !== candidate.captureVersion) return 'queued'
+  if (observation.status === 'pending') return 'running'
+  if (observation.status === 'ready') return 'needs check'
+  if (observation.status === 'missing_key' || observation.status === 'error') return 'needs manual'
+  return observation.status || 'queued'
+}
+
+function shouldShowManualChoices(candidate, observation) {
+  if (!candidate || candidate.status !== 'needs_answer') return false
+  if (!observation || observation.captureVersion !== candidate.captureVersion) return false
+  return observation.status === 'ready'
+    || observation.status === 'error'
+    || observation.status === 'missing_key'
+}
+
+function buildVlmQueueItems(semanticDraft, observation) {
+  const candidates = semanticDraft?.candidates || []
+  const items = candidates.map((candidate, index) => ({
+    id: candidate.candidateId,
+    label: `Doodle ${index + 1}`,
+    extractor: candidate.extractor,
+    state: candidateQueueState(candidate, observation),
+    answer: candidate.answer,
+  }))
+  if (!items.length && observation) {
+    items.push({
+      id: observation.jobId || 'vision',
+      label: 'Vision pass',
+      extractor: 'capture',
+      state: visualObservationLabel(observation),
+      answer: null,
+    })
+  }
+  return items
+}
+
+function vlmQueueSummary(items, observation) {
+  const running = items.filter((item) => item.state === 'running').length
+  const blocked = items.filter((item) => item.state === 'needs manual' || item.state === 'needs check').length
+  const passed = items.filter((item) => item.state === 'passed').length
+  if (running) return `${running} running`
+  if (blocked) return `${blocked} needs check`
+  if (passed) return `${passed} passed`
+  return visualObservationLabel(observation)
+}
+
+function syncStatusLabel(status) {
+  const labels = {
+    idle: 'joining',
+    waiting: 'joining',
+    loading: 'joining',
+    connecting: 'joining',
+    connected: 'connected',
+    disconnected: 'room disconnected',
+    error: 'backend unreachable',
+  }
+  return labels[status] || status
+}
+
+function syncStatusClassName(status) {
+  if (status === 'connected') return 'connected'
+  if (status === 'loading' || status === 'connecting' || status === 'idle' || status === 'waiting') return 'connecting'
+  if (status === 'disconnected') return 'disconnected'
+  if (status === 'error') return 'error'
+  return status
+}
+
 function choiceLabel(choice) {
   const labels = {
     yes_platform: 'Solid',
@@ -277,6 +444,18 @@ function choiceLabel(choice) {
     no_ignore: 'Ignore',
   }
   return labels[choice?.id] || choice?.label || 'Choose'
+}
+
+function compactChoices(choices) {
+  const wanted = ['normal', 'spikes', 'cannon', 'portal_pair', 'portal_endpoint', 'decor', 'no_ignore']
+  const seen = new Set()
+  return wanted
+    .map((choiceId) => choices.find((choice) => choice.id === choiceId))
+    .filter((choice) => {
+      if (!choice || seen.has(choice.role)) return false
+      seen.add(choice.role)
+      return true
+    })
 }
 
 function ensureStageFrame(editor) {
@@ -314,80 +493,258 @@ function ensureStageFrame(editor) {
   editor.setCurrentTool('draw')
 }
 
-function platformClassName(platform) {
-  const kind = platform.kind || (platform.pass ? 'float' : 'ground')
-  return `reference-platform reference-platform-${kind}${platform.pass ? ' reference-platform-pass' : ''}`
+function cloneArray(value) {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => ({ ...item }))
 }
 
-function PlatformReferenceLayer({ stageReference }) {
+function itemEditorId(kind, item, index) {
+  if (!item) return ''
+  if (item.editorId || item.id) return String(item.editorId || item.id)
+  const source = item.source
+  if (source?.kind === 'magicboard_agent' && source.candidateId) return `${kind}-candidate-${source.candidateId}`
+  if (kind === 'portal') return `portal-${index}-${Math.round(item.x || 0)}-${Math.round(item.y || 0)}-${Math.round(item.r || 0)}`
+  return `platform-${index}-${Math.round(item.x || 0)}-${Math.round(item.y || 0)}-${Math.round(item.w || 0)}-${Math.round(item.h || 0)}`
+}
+
+function stageFromReference(stageReference) {
   const reference = stageReference || EMPTY_STAGE_REFERENCE
-  const view = reference.view || { w: GAME_FRAME.w, h: GAME_FRAME.h }
-  const bounds = reference.bounds || { x0: 0, y0: 0, x1: view.w, y1: view.h }
-  const platforms = reference.platforms || []
-  const portals = reference.portals || []
-  const spawns = reference.spawns || []
+  const view = reference.view || {}
+  const x0 = reference.bounds?.x0 ?? view.x ?? GAME_FRAME.x
+  const y0 = reference.bounds?.y0 ?? view.y ?? GAME_FRAME.y
+  const x1 = reference.bounds?.x1 ?? x0 + (view.w || GAME_FRAME.w)
+  const y1 = reference.bounds?.y1 ?? y0 + (view.h || GAME_FRAME.h)
+  return {
+    bounds: { x0, y0, x1, y1 },
+    platforms: cloneArray(reference.platforms),
+    portals: cloneArray(reference.portals),
+    spawns: cloneArray(reference.spawns),
+    decor: cloneArray(reference.decor),
+    bg: cloneArray(reference.bg),
+  }
+}
+
+function platformForKind(kind) {
+  const base = { x: 760, y: 700, w: 320, h: 44, kind: 'wood', pass: true }
+  if (kind === 'spikes') {
+    return { ...base, w: 280, h: 46, kind: 'spikes', pass: false, hurt: { damage: 26, kbBase: 40, kbScale: 0.18, cooldown: 0.6 } }
+  }
+  if (kind === 'cannon') {
+    return { ...base, w: 92, h: 56, kind: 'cannon', pass: false, fire: { deg: 0, every: 2.0, speed: 880, damage: 11, kbBase: 32, kbScale: 0.12, r: 26, delay: 0 } }
+  }
+  return base
+}
+
+function portalPairAtCenter() {
+  const stamp = `ipad-${Date.now().toString(36)}`
+  const a = { id: `${stamp}-a`, editorId: `${stamp}-a`, link: `${stamp}-b`, x: 700, y: 610, r: 74, col: '#3f6fa0' }
+  const b = { id: `${stamp}-b`, editorId: `${stamp}-b`, link: `${stamp}-a`, x: 1220, y: 610, r: 74, col: '#3f6fa0' }
+  return { a, b }
+}
+
+function CanvasStageReferenceLayer({ stageReference }) {
+  const canvasRef = useRef(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    const DS = window.DS
+    if (!canvas || !DS?.stage?.drawStage || !DS?.draw) return
+
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
+    canvas.width = Math.round(GAME_FRAME.w * dpr)
+    canvas.height = Math.round(GAME_FRAME.h * dpr)
+
+    const ctx = canvas.getContext('2d')
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, GAME_FRAME.w, GAME_FRAME.h)
+
+    DS.VIEW = { w: GAME_FRAME.w, h: GAME_FRAME.h }
+    DS.DPR = dpr
+    DS.draw.clearCache?.()
+    DS.draw.setLod?.(1)
+
+    const stage = stageFromReference(stageReference)
+    ctx.drawImage(DS.draw.paperTexture(GAME_FRAME.w, GAME_FRAME.h), 0, 0)
+    DS.stage.drawBackground(ctx, stage)
+    DS.stage.drawStage(ctx, stage)
+  }, [stageReference])
 
   return (
-    <div
-      className="platform-reference-frame"
+    <canvas
+      ref={canvasRef}
+      className="stage-reference-canvas"
       data-testid="static-platform-reference"
       aria-hidden="true"
+      width={GAME_FRAME.w}
+      height={GAME_FRAME.h}
+    />
+  )
+}
+
+function StageEditLayer({ stageReference, selectedItem, active, onSelectItem, onCommitEdit }) {
+  const svgRef = useRef(null)
+  const dragRef = useRef(null)
+  const stage = useMemo(() => stageFromReference(stageReference), [stageReference])
+
+  const pointerToStage = useCallback((event) => {
+    const svg = svgRef.current || event.currentTarget.ownerSVGElement || event.currentTarget
+    const point = svg.createSVGPoint()
+    point.x = event.clientX
+    point.y = event.clientY
+    const ctm = svg.getScreenCTM()
+    if (!ctm) return { x: 0, y: 0 }
+    const local = point.matrixTransform(ctm.inverse())
+    return { x: local.x, y: local.y }
+  }, [])
+
+  const startPlatformDrag = useCallback((event, platform, index, mode) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const id = itemEditorId('platform', platform, index)
+    onSelectItem({ type: 'platform', id })
+    dragRef.current = {
+      type: 'platform',
+      mode,
+      targetId: id,
+      start: point,
+      original: { x: platform.x || 0, y: platform.y || 0, w: platform.w || 1, h: platform.h || 1 },
+    }
+    const svg = svgRef.current || event.currentTarget.ownerSVGElement
+    svg?.setPointerCapture?.(event.pointerId)
+  }, [onSelectItem, pointerToStage])
+
+  const startPortalDrag = useCallback((event, portal, index, mode) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const id = itemEditorId('portal', portal, index)
+    onSelectItem({ type: 'portal', id })
+    dragRef.current = {
+      type: 'portal',
+      mode,
+      targetId: id,
+      start: point,
+      original: { x: portal.x || 0, y: portal.y || 0, r: portal.r || 74 },
+    }
+    const svg = svgRef.current || event.currentTarget.ownerSVGElement
+    svg?.setPointerCapture?.(event.pointerId)
+  }, [onSelectItem, pointerToStage])
+
+  const handlePointerMove = useCallback((event) => {
+    const drag = dragRef.current
+    if (!drag) return
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const dx = point.x - drag.start.x
+    const dy = point.y - drag.start.y
+    if (drag.type === 'platform') {
+      const patch = drag.mode === 'resize'
+        ? { w: Math.max(40, drag.original.w + dx), h: Math.max(18, drag.original.h + dy) }
+        : { x: drag.original.x + dx, y: drag.original.y + dy }
+      onCommitEdit({ type: 'update_platform', targetId: drag.targetId, patch }, { preview: true })
+    } else if (drag.type === 'portal') {
+      const patch = drag.mode === 'resize'
+        ? { r: Math.max(30, drag.original.r + dy) }
+        : { x: drag.original.x + dx, y: drag.original.y + dy }
+      onCommitEdit({ type: 'update_portal', targetId: drag.targetId, patch }, { preview: true })
+    }
+  }, [onCommitEdit, pointerToStage])
+
+  const handlePointerUp = useCallback((event) => {
+    const drag = dragRef.current
+    if (!drag) return
+    dragRef.current = null
+    event.preventDefault()
+    event.stopPropagation()
+    const point = pointerToStage(event)
+    const dx = point.x - drag.start.x
+    const dy = point.y - drag.start.y
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return
+    if (drag.type === 'platform') {
+      onCommitEdit({
+        type: 'update_platform',
+        targetId: drag.targetId,
+        patch: drag.mode === 'resize'
+          ? { w: Math.max(40, drag.original.w + dx), h: Math.max(18, drag.original.h + dy) }
+          : { x: drag.original.x + dx, y: drag.original.y + dy },
+      })
+    } else if (drag.type === 'portal') {
+      onCommitEdit({
+        type: 'update_portal',
+        targetId: drag.targetId,
+        patch: drag.mode === 'resize'
+          ? { r: Math.max(30, drag.original.r + dy) }
+          : { x: drag.original.x + dx, y: drag.original.y + dy },
+      })
+    }
+  }, [onCommitEdit, pointerToStage])
+
+  return (
+    <svg
+      ref={svgRef}
+      className={`stage-edit-layer${active ? ' active' : ''}`}
+      viewBox={`${GAME_FRAME.x} ${GAME_FRAME.y} ${GAME_FRAME.w} ${GAME_FRAME.h}`}
+      width={GAME_FRAME.w}
+      height={GAME_FRAME.h}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
     >
-      <svg
-        className="platform-reference-svg"
-        viewBox={`0 0 ${view.w} ${view.h}`}
-        width={view.w}
-        height={view.h}
-        focusable="false"
-      >
-        <rect className="reference-view-fill" x="0" y="0" width={view.w} height={view.h} />
-        <rect className="reference-bounds" x={bounds.x0 || 0} y={bounds.y0 || 0} width={(bounds.x1 || view.w) - (bounds.x0 || 0)} height={(bounds.y1 || view.h) - (bounds.y0 || 0)} />
-        {platforms.map((platform, index) => {
-          const radius = Math.min(platform.h / 2, platform.pass ? 16 : 20)
-          return (
-            <g key={`${platform.x}-${platform.y}-${platform.w}-${platform.h}-${index}`}>
+      {stage.platforms.map((platform, index) => {
+        const id = itemEditorId('platform', platform, index)
+        const selected = selectedItem?.type === 'platform' && selectedItem.id === id
+        return (
+          <g key={id}>
+            <rect
+              className={`stage-edit-hitbox${selected ? ' selected' : ''}`}
+              x={platform.x}
+              y={platform.y}
+              width={platform.w}
+              height={platform.h}
+              onPointerDown={(event) => startPlatformDrag(event, platform, index, 'move')}
+            />
+            {selected ? (
               <rect
-                className="reference-platform-shadow"
-                x={platform.x + 9}
-                y={platform.y + 12}
-                width={platform.w}
-                height={platform.h}
-                rx={radius}
-                ry={radius}
+                className="stage-edit-resize"
+                x={(platform.x || 0) + (platform.w || 0) - 26}
+                y={(platform.y || 0) + (platform.h || 0) - 26}
+                width="38"
+                height="38"
+                onPointerDown={(event) => startPlatformDrag(event, platform, index, 'resize')}
               />
+            ) : null}
+          </g>
+        )
+      })}
+      {stage.portals.map((portal, index) => {
+        const id = itemEditorId('portal', portal, index)
+        const selected = selectedItem?.type === 'portal' && selectedItem.id === id
+        return (
+          <g key={id}>
+            <ellipse
+              className={`stage-edit-hitbox portal${selected ? ' selected' : ''}`}
+              cx={portal.x}
+              cy={portal.y}
+              rx={(portal.r || 74) * 0.72}
+              ry={portal.r || 74}
+              onPointerDown={(event) => startPortalDrag(event, portal, index, 'move')}
+            />
+            {selected ? (
               <rect
-                className={platformClassName(platform)}
-                x={platform.x}
-                y={platform.y}
-                width={platform.w}
-                height={platform.h}
-                rx={radius}
-                ry={radius}
+                className="stage-edit-resize"
+                x={(portal.x || 0) - 19}
+                y={(portal.y || 0) + (portal.r || 74) - 19}
+                width="38"
+                height="38"
+                onPointerDown={(event) => startPortalDrag(event, portal, index, 'resize')}
               />
-              <line
-                className="reference-platform-topline"
-                x1={platform.x + radius}
-                y1={platform.y + Math.min(16, platform.h / 2)}
-                x2={platform.x + platform.w - radius}
-                y2={platform.y + Math.min(16, platform.h / 2)}
-              />
-            </g>
-          )
-        })}
-        {portals.map((portal, index) => (
-          <g key={`portal-${portal.id || index}`}>
-            <circle className="reference-portal-fill" cx={portal.x} cy={portal.y} r={portal.r || 44} />
-            <circle className="reference-portal-ring" cx={portal.x} cy={portal.y} r={portal.r || 44} />
+            ) : null}
           </g>
-        ))}
-        {spawns.map((spawn, index) => (
-          <g key={`spawn-${index}`}>
-            <circle className="reference-spawn" cx={spawn.x} cy={spawn.y} r="24" />
-            <text className="reference-spawn-label" x={spawn.x} y={spawn.y + 8}>{index + 1}</text>
-          </g>
-        ))}
-      </svg>
-    </div>
+        )
+      })}
+    </svg>
   )
 }
 
@@ -439,6 +796,7 @@ function SemanticPanel({
   onSelectCandidate,
   onAnswer,
   error,
+  visualObservation,
 }) {
   const candidates = semanticDraft?.candidates || []
   const pending = candidates.filter((candidate) => candidate.status === 'needs_answer')
@@ -446,11 +804,12 @@ function SemanticPanel({
   const selected = current?.status === 'needs_answer' ? current : pending[0] || current || candidates[0]
   if (!candidates.length) return null
   const question = selected?.question
-  const choices = question?.choices || []
+  const choices = compactChoices(question?.choices || [])
   const pendingCount = pending.length
+  const showManualChoices = shouldShowManualChoices(selected, visualObservation)
 
   return (
-    <section className="semantic-panel" aria-label="Agent asks">
+    <section className={`semantic-panel ${showManualChoices ? 'manual-ready' : 'vlm-first'}`} aria-label="Doodle classification">
       <div className="semantic-candidate-strip">
         {candidates.map((candidate, index) => (
           <button
@@ -467,12 +826,17 @@ function SemanticPanel({
         <div className="semantic-question">
           <div className="semantic-question-head">
             <div>
-              <span>{pendingCount ? `Agent asks · ${pendingCount} left` : 'Agent state'}</span>
-              <strong>{selected.status === 'needs_answer' ? question?.prompt || 'What should this platform do?' : selected.answer?.choiceId || selected.status}</strong>
+              <span>{pendingCount ? `Vision queue · ${pendingCount} waiting` : 'Doodle type'}</span>
+              <strong>{selected.status === 'needs_answer' ? 'Vision is checking this doodle' : selected.answer?.choiceId || selected.status}</strong>
             </div>
             <span>{selected.extractor}</span>
           </div>
-          {selected.status === 'needs_answer' ? (
+          {showManualChoices ? (
+            <p className="semantic-answer-state">
+              Vision could not decide. Pick a type below.
+            </p>
+          ) : null}
+          {showManualChoices ? (
             <div className="semantic-choice-grid">
               {choices.map((choice) => (
                 <button
@@ -484,6 +848,12 @@ function SemanticPanel({
                 </button>
               ))}
             </div>
+          ) : selected.status === 'needs_answer' ? (
+            <p className="semantic-answer-state">
+              {visualObservation?.status === 'pending'
+                ? 'Waiting for VLM before asking you.'
+                : 'Open the VLM queue for pass details.'}
+            </p>
           ) : (
             <p className="semantic-answer-state">
               {selected.answer?.role === 'platform' ? `Confirmed: ${selected.answer.behavior}` : selected.status}
@@ -491,6 +861,29 @@ function SemanticPanel({
           )}
           {error ? <p className="semantic-error">{error}</p> : null}
         </div>
+      ) : null}
+    </section>
+  )
+}
+
+function VlmQueuePanel({ items, observation }) {
+  return (
+    <section className="vlm-queue-panel" aria-label="VLM pass queue">
+      <div className="vlm-queue-head">
+        <strong>VLM Queue</strong>
+        <span>{visualObservationLabel(observation)}</span>
+      </div>
+      <ol>
+        {items.map((item) => (
+          <li key={item.id} className={`vlm-queue-item state-${item.state.replace(/\s+/g, '-')}`}>
+            <span>{item.label}</span>
+            <strong>{item.state}</strong>
+            <em>{item.answer?.behavior || item.extractor}</em>
+          </li>
+        ))}
+      </ol>
+      {observation?.errors?.length ? (
+        <p>{observation.errors.slice(0, 2).join(' · ')}</p>
       ) : null}
     </section>
   )
@@ -519,38 +912,199 @@ function VisualObservationPanel({ observation }) {
   )
 }
 
-function VoicePanel({
-  voiceStatus,
-  voiceEvents,
-  agentTurns,
-  proposals,
-  permissionRequests,
-  isRecording,
-  onToggleMic,
+function DesktopSelectionPanel({ selection, currentRoomId, onSwitch }) {
+  if (!selection?.roomId || selection.roomId === currentRoomId) return null
+  return (
+    <section className="desktop-selection-panel" aria-label="Desktop selected level">
+      <div>
+        <strong>Desktop selected</strong>
+        <p>{selection.worldName || selection.worldId || selection.roomId}</p>
+      </div>
+      <button type="button" onClick={() => onSwitch(selection)}>
+        Open level
+      </button>
+    </section>
+  )
+}
+
+function EditorToolbar({
+  tool,
+  selectedItem,
+  queueLabel,
+  queueOpen,
+  onSetTool,
+  onAddPlatform,
+  onAddPortal,
+  onDelete,
+  onNudge,
+  onToggleQueue,
 }) {
-  const latestTranscript = [...voiceEvents].reverse().find((event) => event.type === 'final' || event.type === 'partial')
-  const assistant = [...voiceEvents].reverse().find((event) => event.type === 'assistant_text')
-  const proposal = [...proposals].reverse().find((item) => item.approvalState === 'pending_approval' || item.approvalState === 'approved') || proposals[proposals.length - 1]
-  const permission = permissionRequests.find((item) => item.status === 'pending') || permissionRequests[permissionRequests.length - 1]
-  const turn = agentTurns[agentTurns.length - 1]
+  return (
+    <div className="magic-toolbar" aria-label="Level editor tools">
+      <div className="magic-toolbar-group" role="group" aria-label="Mode">
+        <button
+          type="button"
+          className={tool === 'draw' ? 'active' : ''}
+          onClick={() => onSetTool('draw')}
+          title="Draw doodles"
+        >
+          Draw
+        </button>
+        <button
+          type="button"
+          className={tool === 'edit' ? 'active' : ''}
+          onClick={() => onSetTool('edit')}
+          title="Move and resize level objects"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          className={queueOpen ? 'active' : ''}
+          onClick={onToggleQueue}
+          title="Show VLM pass queue"
+        >
+          VLM {queueLabel}
+        </button>
+      </div>
+      <div className="magic-toolbar-group" role="group" aria-label="Add objects">
+        <button type="button" onClick={() => onAddPlatform('platform')} title="Add platform">+ Platform</button>
+        <button type="button" onClick={() => onAddPlatform('spikes')} title="Add spikes">+ Spikes</button>
+        <button type="button" onClick={() => onAddPlatform('cannon')} title="Add cannon">+ Cannon</button>
+        <button type="button" onClick={onAddPortal} title="Add portal pair">+ Portal</button>
+      </div>
+      <button
+        type="button"
+        className="danger"
+        onClick={onDelete}
+        disabled={!selectedItem}
+        title="Delete selected object"
+      >
+        Delete
+      </button>
+      <div className="magic-toolbar-group nudge" role="group" aria-label="Move selected object">
+        <button type="button" onClick={() => onNudge(0, -24)} disabled={!selectedItem} title="Move up">Up</button>
+        <button type="button" onClick={() => onNudge(-24, 0)} disabled={!selectedItem} title="Move left">Left</button>
+        <button type="button" onClick={() => onNudge(24, 0)} disabled={!selectedItem} title="Move right">Right</button>
+        <button type="button" onClick={() => onNudge(0, 24)} disabled={!selectedItem} title="Move down">Down</button>
+      </div>
+    </div>
+  )
+}
+
+function EditorSheetHeader({ roomName, status, open, onToggle }) {
+  return (
+    <button
+      className="editor-sheet-toggle"
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls="editor-chrome-scroll"
+    >
+      <span>{open ? 'Hide tools' : 'Show tools'}</span>
+      <strong>{roomName || 'Drawing on level'}</strong>
+      <em>{status}</em>
+    </button>
+  )
+}
+
+function JoinRoomScreen({
+  backendUrl,
+  selectionStatus,
+  error,
+  onJoin,
+}) {
+  const [roomCode, setRoomCode] = useState('')
+  const [backendInput, setBackendInput] = useState(() => backendUrlInputValue(backendUrl))
+  const [joinStatus, setJoinStatus] = useState('idle')
+  const [joinError, setJoinError] = useState('')
+  const normalizedRoom = normalizeRoomCode(roomCode)
+  const displayError = joinError || error
+
+  const handleSubmit = async (event) => {
+    event.preventDefault()
+    setJoinError('')
+
+    if (!normalizedRoom) {
+      setJoinError('Enter a room code.')
+      return
+    }
+
+    const normalizedBackendUrl = normalizeBackendUrl(backendInput)
+    const backendValue = backendUrlInputValue(normalizedBackendUrl)
+    setBackendInput(backendValue)
+    setJoinStatus('joining')
+
+    try {
+      const response = await fetch(healthUrlForBackend(normalizedBackendUrl), { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Health check failed: ${response.status}`)
+      onJoin(normalizedRoom, backendValue)
+    } catch (_requestError) {
+      setJoinStatus('backend unreachable')
+      setJoinError(backendUnreachableMessage(backendValue))
+    }
+  }
 
   return (
-    <section className="voice-panel" aria-label="Voice agent">
-      <button className={`voice-mic ${isRecording ? 'recording' : ''}`} type="button" onClick={onToggleMic}>
-        {isRecording ? 'Stop' : 'Mic'}
-      </button>
-      <div className="voice-sheet">
-        <div className="voice-row">
-          <strong>{voiceStatus || 'voice idle'}</strong>
-          <span>{turn ? turn.status : 'no job'}</span>
+    <main className="draw-app draw-app-waiting">
+      <section className="join-panel" aria-label="Join drawing room">
+        <div className="join-panel-head">
+          <p className="join-kicker">Magic Board</p>
+          <h1>Open a level on the laptop</h1>
         </div>
-        <p>{latestTranscript?.transcript || assistant?.transcript || 'Transcript will appear here.'}</p>
-        <div className="voice-chips">
-          <span>{proposal ? `proposal · ${proposal.approvalState}` : 'no proposal'}</span>
-          <span>{permission ? permission.status : 'no permission'}</span>
+        <form className="join-form" onSubmit={handleSubmit}>
+          <p className="join-hint">
+            The iPad will attach automatically when the laptop opens Edit Level.
+          </p>
+          <label className="join-field">
+            <span>Room code</span>
+            <input
+              type="text"
+              value={roomCode}
+              onChange={(event) => setRoomCode(event.target.value)}
+              inputMode="text"
+              autoCapitalize="none"
+              autoCorrect="off"
+              placeholder="demo"
+              aria-describedby="room-code-hint"
+            />
+          </label>
+          <p id="room-code-hint" className="join-hint">
+            Manual room entry is available for testing.
+          </p>
+          <details className="join-advanced">
+            <summary>Connection</summary>
+            <label className="join-field">
+              <span>Backend URL</span>
+              <input
+                type="url"
+                value={backendInput}
+                onChange={(event) => setBackendInput(event.target.value)}
+                inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
+              />
+            </label>
+          </details>
+          <button className="join-button" type="submit" disabled={joinStatus === 'joining'}>
+            {joinStatus === 'joining' ? 'Joining...' : 'Join'}
+          </button>
+        </form>
+        <div className="join-details" aria-label="Connection details">
+          <dl>
+            <div>
+              <dt>Status</dt>
+              <dd>{joinStatus === 'idle' ? selectionStatus : joinStatus}</dd>
+            </div>
+            <div>
+              <dt>Backend</dt>
+              <dd>{backendInput}</dd>
+            </div>
+          </dl>
+          {displayError ? <p>{displayError}</p> : null}
         </div>
-      </div>
-    </section>
+      </section>
+    </main>
   )
 }
 
@@ -566,12 +1120,15 @@ export default function App() {
     () => selectionWsUrlForBackend(backendUrl),
     [backendUrl],
   )
+  const selectionCurrentUrl = useMemo(
+    () => selectionCurrentUrlForBackend(backendUrl),
+    [backendUrl],
+  )
   const urls = useMemo(
     () => (roomId ? {
       capture: captureUrlForRoom(backendUrl, roomId),
       clarifications: clarificationUrlForRoom(backendUrl, roomId),
       visualObservation: visualObservationUrlForRoom(backendUrl, roomId),
-      voiceSessions: voiceSessionsUrlForRoom(backendUrl, roomId),
       websocket: websocketUrlForRoom(backendUrl, roomId),
     } : null),
     [backendUrl, roomId],
@@ -579,9 +1136,6 @@ export default function App() {
 
   const editorRef = useRef(null)
   const socketRef = useRef(null)
-  const voiceSocketRef = useRef(null)
-  const mediaRecorderRef = useRef(null)
-  const micStreamRef = useRef(null)
   const reconnectTimerRef = useRef(null)
   const sendTimerRef = useRef(null)
   const cleanupStoreListenerRef = useRef(null)
@@ -603,26 +1157,157 @@ export default function App() {
   const [visualObservation, setVisualObservation] = useState(null)
   const [selectedCandidateId, setSelectedCandidateId] = useState(null)
   const [semanticError, setSemanticError] = useState('')
-  const [voiceSession, setVoiceSession] = useState(null)
-  const [voiceEvents, setVoiceEvents] = useState([])
-  const [agentTurns, setAgentTurns] = useState([])
-  const [proposals, setProposals] = useState([])
-  const [permissionRequests, setPermissionRequests] = useState([])
-  const [voiceStatus, setVoiceStatus] = useState('voice idle')
-  const [isRecording, setIsRecording] = useState(false)
   const [error, setError] = useState('')
   const [selectionStatus, setSelectionStatus] = useState(explicitRoom ? 'url room' : 'waiting')
+  const [desktopSelection, setDesktopSelection] = useState(null)
+  const [activeTool, setActiveTool] = useState('draw')
+  const [selectedStageItem, setSelectedStageItem] = useState(null)
+  const [sheetOpen, setSheetOpen] = useState(() => window.matchMedia?.('(min-width: 1180px)').matches || false)
+  const [queueOpen, setQueueOpen] = useState(false)
+
+  const vlmQueueItems = useMemo(
+    () => buildVlmQueueItems(semanticDraft, visualObservation),
+    [semanticDraft, visualObservation],
+  )
+  const vlmQueueLabel = useMemo(
+    () => vlmQueueSummary(vlmQueueItems, visualObservation),
+    [vlmQueueItems, visualObservation],
+  )
+  const manualFallbackActive = useMemo(
+    () => (semanticDraft?.candidates || []).some((candidate) => shouldShowManualChoices(candidate, visualObservation)),
+    [semanticDraft, visualObservation],
+  )
+
+  const updateLocalStageReference = useCallback((operation) => {
+    setSelectedRoom((current) => {
+      if (!current?.stageReference) return current
+      return {
+        ...current,
+        stageReference: applyStageOperation(current.stageReference, operation),
+      }
+    })
+  }, [])
+
+  const sendStageEdit = useCallback((operation, options = {}) => {
+    if (!operation) return
+    updateLocalStageReference(operation)
+    if (options.preview) return
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      setError('Room is reconnecting. Try the edit again in a moment.')
+      return
+    }
+    socket.send(JSON.stringify({
+      type: 'stage_edit',
+      operation,
+      stageReferenceVersion: selectedRoom?.stageReferenceVersion || 0,
+      worldId: selectedRoom?.worldId || roomId,
+      clientId: clientIdRef.current,
+      sentAt: new Date().toISOString(),
+    }))
+  }, [roomId, selectedRoom?.stageReferenceVersion, selectedRoom?.worldId, updateLocalStageReference])
+
+  const setEditorTool = useCallback((tool) => {
+    setActiveTool(tool)
+    const editor = editorRef.current
+    if (editor) editor.setCurrentTool(tool === 'draw' ? 'draw' : 'select')
+  }, [])
+
+  const addStagePlatform = useCallback((kind) => {
+    const editorId = `ipad-platform-${Date.now().toString(36)}`
+    const platform = { ...platformForKind(kind), editorId }
+    setActiveTool('edit')
+    setSelectedStageItem({ type: 'platform', id: editorId })
+    sendStageEdit({ type: 'add_platform', platform })
+  }, [sendStageEdit])
+
+  const addStagePortal = useCallback(() => {
+    const pair = portalPairAtCenter()
+    setActiveTool('edit')
+    setSelectedStageItem({ type: 'portal', id: pair.a.editorId })
+    sendStageEdit({ type: 'add_portal_pair', portalPair: pair })
+  }, [sendStageEdit])
+
+  const deleteSelectedStageItem = useCallback(() => {
+    if (!selectedStageItem) return
+    sendStageEdit({
+      type: selectedStageItem.type === 'portal' ? 'delete_portal_pair' : 'delete_platform',
+      targetId: selectedStageItem.id,
+    })
+    setSelectedStageItem(null)
+  }, [selectedStageItem, sendStageEdit])
+
+  const nudgeSelectedStageItem = useCallback((dx, dy) => {
+    if (!selectedStageItem) return
+    const stage = stageFromReference(selectedRoom?.stageReference)
+    const collection = selectedStageItem.type === 'portal' ? stage.portals : stage.platforms
+    const current = collection.find((item, index) => itemEditorId(selectedStageItem.type, item, index) === selectedStageItem.id)
+    if (!current) return
+    sendStageEdit({
+      type: selectedStageItem.type === 'portal' ? 'update_portal' : 'update_platform',
+      targetId: selectedStageItem.id,
+      patch: { x: (current.x || 0) + dx, y: (current.y || 0) + dy },
+    })
+  }, [selectedRoom?.stageReference, selectedStageItem, sendStageEdit])
+
   const tldrawComponents = useMemo(
     () => ({
       OnTheCanvas: () => (
         <>
-          <PlatformReferenceLayer stageReference={selectedRoom?.stageReference} />
+          <CanvasStageReferenceLayer stageReference={selectedRoom?.stageReference} />
           <SemanticCandidateLayer semanticDraft={semanticDraft} selectedCandidateId={selectedCandidateId} />
+          <StageEditLayer
+            stageReference={selectedRoom?.stageReference}
+            selectedItem={selectedStageItem}
+            active={activeTool === 'edit'}
+            onSelectItem={setSelectedStageItem}
+            onCommitEdit={sendStageEdit}
+          />
         </>
       ),
     }),
-    [semanticDraft, selectedCandidateId, selectedRoom?.stageReference],
+    [activeTool, semanticDraft, selectedCandidateId, selectedRoom?.stageReference, selectedStageItem, sendStageEdit],
   )
+
+  const handleJoinRoom = useCallback((nextRoomId, nextBackendUrl) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set('room', nextRoomId)
+    params.set('backend', nextBackendUrl)
+    window.location.assign(`/?${params.toString()}`)
+  }, [])
+
+  const handleSwitchToSelection = useCallback((selection) => {
+    if (!selection?.roomId) return
+    const params = new URLSearchParams(window.location.search)
+    params.set('room', selection.roomId)
+    params.set('backend', backendUrlInputValue(backendUrl))
+    params.set('world', selection.worldId || selection.roomId)
+    if (selection.worldName) params.set('worldName', selection.worldName)
+    else params.delete('worldName')
+    window.location.assign(`/?${params.toString()}`)
+  }, [backendUrl])
+
+  const mergeSelectedRoomContext = useCallback((room) => {
+    if (!room?.roomId || room.roomId !== roomId) return
+    setSelectedRoom((current) => {
+      if (!current || current.roomId !== room.roomId) return current
+      const nextStageReference = hasStageReference(room.stageReference)
+        ? room.stageReference
+        : current.stageReference
+      const nextStageReferenceVersion = room.stageReferenceVersion ?? current.stageReferenceVersion ?? 0
+      if (
+        current.stageReference === nextStageReference
+        && current.stageReferenceVersion === nextStageReferenceVersion
+      ) {
+        return current
+      }
+      return {
+        ...current,
+        stageReference: nextStageReference,
+        stageReferenceVersion: nextStageReferenceVersion,
+      }
+    })
+  }, [roomId])
 
   useEffect(() => {
     const candidates = semanticDraft?.candidates || []
@@ -636,21 +1321,48 @@ export default function App() {
   }, [semanticDraft])
 
   useEffect(() => {
+    if (manualFallbackActive || queueOpen || desktopSelection) setSheetOpen(true)
+  }, [desktopSelection, manualFallbackActive, queueOpen])
+
+  useEffect(() => {
     let cancelled = false
     let socket = null
     let reconnectTimer = 0
+    let pollTimer = 0
+    let inFlightPoll = null
 
     const applySelection = (selection, source) => {
       if (cancelled) return
       if (explicitRoom) {
         setSelectionStatus(source ? `url room · ${source}` : 'url room')
         setError('')
-        setSelectedRoom(explicitRoom)
+        if (selection.roomId && selection.roomId !== explicitRoom.roomId) {
+          setDesktopSelection({
+            roomId: selection.roomId,
+            worldId: selection.worldId || selection.roomId,
+            worldName: selection.worldName || null,
+            stageReference: selection.stageReference || EMPTY_STAGE_REFERENCE,
+            stageReferenceVersion: selection.stageReferenceVersion || 0,
+          })
+          setSelectedRoom(explicitRoom)
+          return
+        }
+        setDesktopSelection(null)
+        setSelectedRoom({
+          ...explicitRoom,
+          stageReference: selection.roomId === explicitRoom.roomId
+            ? selection.stageReference || explicitRoom.stageReference
+            : explicitRoom.stageReference,
+          stageReferenceVersion: selection.roomId === explicitRoom.roomId
+            ? selection.stageReferenceVersion || explicitRoom.stageReferenceVersion || 0
+            : explicitRoom.stageReferenceVersion || 0,
+        })
         return
       }
       if (selection.roomId) {
         setSelectionStatus(source || 'ready')
         setError('')
+        setDesktopSelection(null)
         setSelectedRoom((current) => {
           if (current?.roomId && current.roomId !== selection.roomId) {
             window.location.reload()
@@ -669,10 +1381,13 @@ export default function App() {
             worldId: selection.worldId || selection.roomId,
             worldName: selection.worldName || null,
             stageReference: selection.stageReference || EMPTY_STAGE_REFERENCE,
+            stageReferenceVersion: selection.stageReferenceVersion || 0,
           }
         })
       } else {
         setSelectionStatus('waiting')
+        setError('')
+        setDesktopSelection(null)
         setSelectedRoom((current) => {
           if (current?.roomId) {
             window.location.reload()
@@ -683,14 +1398,37 @@ export default function App() {
       }
     }
 
+    const pollSelection = async () => {
+      if (cancelled) return
+      inFlightPoll?.abort()
+      inFlightPoll = new AbortController()
+      try {
+        const response = await fetch(selectionCurrentUrl, { signal: inFlightPoll.signal })
+        if (!response.ok) throw new Error(`selection ${response.status}`)
+        applySelection(await response.json(), 'polling')
+      } catch (pollError) {
+        if (!cancelled && pollError?.name !== 'AbortError') {
+          setSelectionStatus('backend unreachable')
+          setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
+        }
+      } finally {
+        if (!cancelled) pollTimer = window.setTimeout(pollSelection, 1600)
+      }
+    }
+
     const connectSelectionSocket = () => {
       if (cancelled) return
       window.clearTimeout(reconnectTimer)
       setSelectionStatus((current) => (current === 'waiting' ? current : 'connecting'))
       socket = new WebSocket(selectionWsUrl)
+      let opened = false
 
       socket.addEventListener('open', () => {
-        if (!cancelled) setSelectionStatus('listening')
+        if (!cancelled) {
+          opened = true
+          setSelectionStatus('listening')
+          setError('')
+        }
       })
 
       socket.addEventListener('message', (event) => {
@@ -707,22 +1445,29 @@ export default function App() {
 
       socket.addEventListener('close', () => {
         if (cancelled) return
-        setSelectionStatus('reconnecting')
+        setSelectionStatus(opened ? 'reconnecting' : 'backend unreachable')
+        if (!opened) setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
         reconnectTimer = window.setTimeout(connectSelectionSocket, RECONNECT_DELAY_MS)
       })
 
       socket.addEventListener('error', () => {
-        if (!cancelled) setSelectionStatus('selection socket error')
+        if (!cancelled) {
+          setSelectionStatus('backend unreachable')
+          setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
+        }
       })
     }
 
+    pollSelection()
     connectSelectionSocket()
     return () => {
       cancelled = true
       window.clearTimeout(reconnectTimer)
+      window.clearTimeout(pollTimer)
+      inFlightPoll?.abort()
       socket?.close()
     }
-  }, [explicitRoom, selectionWsUrl])
+  }, [backendUrl, explicitRoom, selectionCurrentUrl, selectionWsUrl])
 
   useEffect(() => {
     setStatus(roomId ? 'idle' : 'waiting')
@@ -734,54 +1479,12 @@ export default function App() {
     setVisualObservation(null)
     setSelectedCandidateId(null)
     setSemanticError('')
-    setVoiceSession(null)
-    setVoiceEvents([])
-    setAgentTurns([])
-    setProposals([])
-    setPermissionRequests([])
-    setVoiceStatus('voice idle')
-    setIsRecording(false)
+    setSelectedStageItem(null)
+    setActiveTool('draw')
     localHadUserContentRef.current = false
     userInteractedRef.current = false
     previousSourceIdsRef.current = new Set()
   }, [roomId])
-
-  const applyVoiceState = useCallback((message) => {
-    if (Array.isArray(message.voiceSessions)) {
-      setVoiceSession((current) => message.voiceSessions.find((session) => session.sessionId === current?.sessionId) || message.voiceSessions.find((session) => session.status !== 'ended') || current)
-      const active = message.voiceSessions.find((session) => session.status !== 'ended')
-      if (active) setVoiceStatus(`voice ${active.status}`)
-    }
-    if (Array.isArray(message.voiceEvents)) {
-      setVoiceEvents((current) => {
-        const byId = new Map(current.map((event) => [event.eventId, event]))
-        message.voiceEvents.forEach((event) => byId.set(event.eventId, event))
-        return Array.from(byId.values()).slice(-40)
-      })
-    }
-    if (Array.isArray(message.agentTurns)) setAgentTurns(message.agentTurns)
-    if (Array.isArray(message.proposals)) setProposals(message.proposals)
-    if (Array.isArray(message.permissionRequests)) setPermissionRequests(message.permissionRequests)
-  }, [])
-
-  const activePendingCandidate = useMemo(() => {
-    const candidates = semanticDraft?.candidates || []
-    return candidates.find((candidate) => candidate.candidateId === selectedCandidateId && candidate.status === 'needs_answer')
-      || candidates.find((candidate) => candidate.status === 'needs_answer')
-      || null
-  }, [semanticDraft, selectedCandidateId])
-
-  useEffect(() => {
-    if (!activePendingCandidate?.question?.prompt || !window.speechSynthesis) return
-    const utterance = new SpeechSynthesisUtterance(activePendingCandidate.question.prompt)
-    utterance.rate = 0.96
-    utterance.pitch = 1
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(utterance)
-    return () => {
-      window.speechSynthesis?.cancel()
-    }
-  }, [activePendingCandidate?.questionId])
 
   const sendCaptureNow = useCallback(() => {
     const editor = editorRef.current
@@ -871,10 +1574,12 @@ export default function App() {
 
     setStatus('connecting')
     const socket = new WebSocket(urls.websocket)
+    let opened = false
     socketRef.current = socket
 
     socket.addEventListener('open', () => {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
+      opened = true
       setStatus('connected')
       setError('')
       if (pendingCaptureRef.current) sendCaptureNow()
@@ -895,14 +1600,14 @@ export default function App() {
         setRoomVersion(message.version ?? 0)
         setSemanticDraft(message.semanticDraft || null)
         setVisualObservation(message.visualObservation || null)
-        applyVoiceState(message)
+        mergeSelectedRoomContext(message)
       } else if (message.type === 'projection_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
         setLastSyncedAt(message.updatedAt || new Date().toISOString())
         setSemanticDraft(message.semanticDraft || null)
         setVisualObservation(message.visualObservation || null)
-        applyVoiceState(message)
+        mergeSelectedRoomContext(message)
       } else if (message.type === 'semantic_draft_updated') {
         setStatus('connected')
         setRoomVersion(message.version ?? 0)
@@ -912,8 +1617,10 @@ export default function App() {
         setRoomVersion(message.version ?? 0)
         setVisualObservation(message.visualObservation || null)
         if (message.semanticDraft) setSemanticDraft(message.semanticDraft)
-      } else if (message.type === 'voice_room_state_updated') {
-        applyVoiceState(message)
+      } else if (message.type === 'stage_edit_updated') {
+        setStatus('connected')
+        setRoomVersion(message.version ?? 0)
+        mergeSelectedRoomContext(message)
       } else if (message.type === 'error') {
         setError(message.message || 'Backend rejected a message.')
         setSemanticError(message.message || 'Backend rejected a message.')
@@ -924,87 +1631,17 @@ export default function App() {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
       socketRef.current = null
       if (!mountedRef.current || mountIdRef.current !== mountId) return
-      setStatus('disconnected')
+      setStatus(opened ? 'disconnected' : 'error')
+      if (!opened) setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
       reconnectTimerRef.current = window.setTimeout(() => connectWebSocket(mountId), RECONNECT_DELAY_MS)
     })
 
     socket.addEventListener('error', () => {
       if (socketRef.current !== socket || mountIdRef.current !== mountId) return
       setStatus('error')
+      setError(backendUnreachableMessage(backendUrlInputValue(backendUrl)))
     })
-  }, [applyVoiceState, sendCaptureNow, urls])
-
-  const stopVoice = useCallback(async (sendStop = true) => {
-    if (sendStop && voiceSocketRef.current?.readyState === WebSocket.OPEN) {
-      voiceSocketRef.current.send(JSON.stringify({ type: 'stop' }))
-    }
-    if (mediaRecorderRef.current) {
-      try { mediaRecorderRef.current.stop() } catch (_error) {}
-      mediaRecorderRef.current = null
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((track) => track.stop())
-      micStreamRef.current = null
-    }
-    if (voiceSocketRef.current) {
-      const socket = voiceSocketRef.current
-      voiceSocketRef.current = null
-      try { socket.close() } catch (_error) {}
-    }
-    if (voiceSession?.sessionId && urls) {
-      fetch(voiceSessionUrlForRoom(backendUrl, roomId, voiceSession.sessionId), { method: 'DELETE' }).catch(() => {})
-    }
-    setIsRecording(false)
-    setVoiceStatus('voice idle')
-  }, [backendUrl, roomId, urls, voiceSession])
-
-  const startVoice = useCallback(async () => {
-    if (!urls || isRecording) return
-    if (!navigator.mediaDevices || !window.MediaRecorder) {
-      setVoiceStatus('mic unavailable')
-      return
-    }
-    setVoiceStatus('voice starting')
-    try {
-      const response = await fetch(urls.voiceSessions, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: clientIdRef.current, worldId: selectedRoom?.worldId || roomId }),
-      })
-      if (!response.ok) {
-        const body = await response.json().catch(() => null)
-        throw new Error(body?.detail?.message || `Voice failed: ${response.status}`)
-      }
-      const session = await response.json()
-      setVoiceSession(session)
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      micStreamRef.current = stream
-      const socket = new WebSocket(voiceWsUrlForRoom(backendUrl, roomId, session.sessionId))
-      voiceSocketRef.current = socket
-      socket.addEventListener('open', () => {
-        const options = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : undefined
-        const recorder = new MediaRecorder(stream, options)
-        mediaRecorderRef.current = recorder
-        recorder.addEventListener('dataavailable', (event) => {
-          if (event.data?.size && socket.readyState === WebSocket.OPEN) socket.send(event.data)
-        })
-        recorder.start(250)
-        setIsRecording(true)
-        setVoiceStatus('voice listening')
-      })
-      socket.addEventListener('close', () => {
-        stopVoice(false)
-      })
-    } catch (requestError) {
-      setVoiceStatus(requestError.message || 'voice error')
-      stopVoice(false)
-    }
-  }, [backendUrl, isRecording, roomId, selectedRoom?.worldId, stopVoice, urls])
-
-  const toggleVoice = useCallback(() => {
-    if (isRecording) stopVoice()
-    else startVoice()
-  }, [isRecording, startVoice, stopVoice])
+  }, [backendUrl, mergeSelectedRoomContext, sendCaptureNow, urls])
 
   const handleMount = useCallback(
     (editor) => {
@@ -1026,6 +1663,7 @@ export default function App() {
           setRoomVersion(room.version ?? 0)
           setSemanticDraft(room.semanticDraft || null)
           setVisualObservation(room.visualObservation || null)
+          mergeSelectedRoomContext(room)
           localHadUserContentRef.current = projectionObjectCount(room.projection) > 0
 
           if (room.capture) {
@@ -1034,7 +1672,11 @@ export default function App() {
           ensureStageFrame(editor)
         } catch (requestError) {
           ensureStageFrame(editor)
-          setError(requestError.message || 'Could not load backend capture.')
+          setError(
+            requestError instanceof TypeError
+              ? backendUnreachableMessage(backendUrlInputValue(backendUrl))
+              : requestError.message || 'Could not load backend capture.',
+          )
         } finally {
           if (!mountedRef.current || mountIdRef.current !== mountId) return
           loadingCaptureRef.current = false
@@ -1061,32 +1703,20 @@ export default function App() {
         cleanupStoreListenerRef.current = null
         socketRef.current?.close()
         socketRef.current = null
-        stopVoice(false)
         editorRef.current = null
       }
     },
-    [connectWebSocket, scheduleCaptureSend, stopVoice, urls],
+    [backendUrl, connectWebSocket, mergeSelectedRoomContext, scheduleCaptureSend, urls],
   )
 
   if (!roomId) {
     return (
-      <main className="draw-app draw-app-waiting">
-        <section className="selection-wait-panel" aria-label="Desktop room selection">
-          <h1>Waiting for desktop selection</h1>
-          <p>Open a level on the desktop with Edit Level.</p>
-          <dl>
-            <div>
-              <dt>Status</dt>
-              <dd>{selectionStatus}</dd>
-            </div>
-            <div>
-              <dt>Backend</dt>
-              <dd>{backendUrl.toString()}</dd>
-            </div>
-          </dl>
-          {error ? <p className="selection-error">{error}</p> : null}
-        </section>
-      </main>
+      <JoinRoomScreen
+        backendUrl={backendUrl}
+        selectionStatus={selectionStatus}
+        error={error}
+        onJoin={handleJoinRoom}
+      />
     )
   }
 
@@ -1096,70 +1726,102 @@ export default function App() {
       onPointerDownCapture={() => { userInteractedRef.current = true }}
       onKeyDownCapture={() => { userInteractedRef.current = true }}
     >
-      <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} />
-      <SemanticPanel
-        semanticDraft={semanticDraft}
-        selectedCandidateId={selectedCandidateId}
-        onSelectCandidate={setSelectedCandidateId}
-        onAnswer={sendClarificationAnswer}
-        error={semanticError}
+      <Tldraw key={roomId} onMount={handleMount} components={tldrawComponents} hideUi />
+      <EditorToolbar
+        tool={activeTool}
+        selectedItem={selectedStageItem}
+        queueLabel={vlmQueueLabel}
+        queueOpen={queueOpen}
+        onSetTool={setEditorTool}
+        onAddPlatform={addStagePlatform}
+        onAddPortal={addStagePortal}
+        onDelete={deleteSelectedStageItem}
+        onNudge={nudgeSelectedStageItem}
+        onToggleQueue={() => {
+          setQueueOpen((current) => !current)
+          setSheetOpen(true)
+        }}
       />
-      <VisualObservationPanel observation={visualObservation} />
-      <VoicePanel
-        voiceStatus={voiceStatus}
-        voiceEvents={voiceEvents}
-        agentTurns={agentTurns}
-        proposals={proposals}
-        permissionRequests={permissionRequests}
-        isRecording={isRecording}
-        onToggleMic={toggleVoice}
-      />
-      <section className="debug-panel" aria-label="Sync status">
-        <div className={`status-dot status-${status}`} />
-        <dl>
-          <div>
-            <dt>Status</dt>
-            <dd>{status}</dd>
-          </div>
-          <div>
-            <dt>Room</dt>
-            <dd>{roomId}</dd>
-          </div>
-          <div>
-            <dt>World</dt>
-            <dd>{selectedRoom?.worldName || selectedRoom?.worldId || 'selected'}</dd>
-          </div>
-          <div>
-            <dt>Reference</dt>
-            <dd>{`${selectedRoom?.stageReference?.platforms?.length || 0} platforms · ${selectedRoom?.stageReference?.portals?.length || 0} portals`}</dd>
-          </div>
-          <div>
-            <dt>Backend</dt>
-            <dd>{backendVersion}</dd>
-          </div>
-          <div>
-            <dt>Version</dt>
-            <dd>{roomVersion}</dd>
-          </div>
-          <div>
-            <dt>Objects</dt>
-            <dd>{projectionCount}</dd>
-          </div>
-          <div>
-            <dt>Draft</dt>
-            <dd>{semanticCandidateCount(semanticDraft)}</dd>
-          </div>
-          <div>
-            <dt>Vision</dt>
-            <dd>{visualObservationLabel(visualObservation)}</dd>
-          </div>
-          <div>
-            <dt>Synced</dt>
-            <dd>{formatTime(lastSyncedAt)}</dd>
-          </div>
-        </dl>
-        {error ? <p>{error}</p> : null}
-      </section>
+      <aside className={`editor-chrome ${sheetOpen ? 'open' : 'collapsed'} ${queueOpen ? 'queue-open' : ''}`} aria-label="Magic Board editor tools">
+        <EditorSheetHeader
+          roomName={selectedRoom?.worldName || selectedRoom?.worldId || roomId}
+          status={`${syncStatusLabel(status)} · ${vlmQueueLabel}`}
+          open={sheetOpen}
+          onToggle={() => setSheetOpen((current) => !current)}
+        />
+        <div id="editor-chrome-scroll" className="editor-chrome-scroll">
+          <DesktopSelectionPanel
+            selection={desktopSelection}
+            currentRoomId={roomId}
+            onSwitch={handleSwitchToSelection}
+          />
+          {queueOpen ? (
+            <VlmQueuePanel items={vlmQueueItems} observation={visualObservation} />
+          ) : null}
+          <SemanticPanel
+            semanticDraft={semanticDraft}
+            selectedCandidateId={selectedCandidateId}
+            onSelectCandidate={setSelectedCandidateId}
+            onAnswer={sendClarificationAnswer}
+            error={semanticError}
+            visualObservation={visualObservation}
+          />
+          <details className="details-drawer">
+            <summary>Details</summary>
+            <VisualObservationPanel observation={visualObservation} />
+            <section className="debug-panel" aria-label="Sync status">
+              <div className={`status-dot status-${syncStatusClassName(status)}`} />
+              <dl>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{syncStatusLabel(status)}</dd>
+                </div>
+                <div>
+                  <dt>Room</dt>
+                  <dd>{roomId}</dd>
+                </div>
+                <div>
+                  <dt>Endpoint</dt>
+                  <dd>{backendUrlInputValue(backendUrl)}</dd>
+                </div>
+                <div>
+                  <dt>World</dt>
+                  <dd>{selectedRoom?.worldName || selectedRoom?.worldId || 'selected'}</dd>
+                </div>
+                <div>
+                  <dt>Reference</dt>
+                  <dd>{`${selectedRoom?.stageReference?.platforms?.length || 0} platforms · ${selectedRoom?.stageReference?.portals?.length || 0} portals`}</dd>
+                </div>
+                <div>
+                  <dt>Backend</dt>
+                  <dd>{backendVersion}</dd>
+                </div>
+                <div>
+                  <dt>Version</dt>
+                  <dd>{roomVersion}</dd>
+                </div>
+                <div>
+                  <dt>Objects</dt>
+                  <dd>{projectionCount}</dd>
+                </div>
+                <div>
+                  <dt>Draft</dt>
+                  <dd>{semanticCandidateCount(semanticDraft)}</dd>
+                </div>
+                <div>
+                  <dt>Vision</dt>
+                  <dd>{visualObservationLabel(visualObservation)}</dd>
+                </div>
+                <div>
+                  <dt>Synced</dt>
+                  <dd>{formatTime(lastSyncedAt)}</dd>
+                </div>
+              </dl>
+              {error ? <p>{error}</p> : null}
+            </section>
+          </details>
+        </div>
+      </aside>
     </main>
   )
 }

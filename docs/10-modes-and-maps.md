@@ -49,6 +49,8 @@ unchanged. `Game.checkOver()` (last-one-standing) is only called by Smash's `upd
 stamps stable jitter seeds, breakable `_hp`, initial moving-platform positions, and the world
 `bounds` + `blast`.
 
+- **Demo** (`demo`, `editable:true`) — the permanent menu-flow level: classic Doodle Smash setup,
+  local/player lobby, and the same live stage surface the original menu path used.
 - **Meadow** (`meadow`, `editable:true`) — **is** the live `data.stage` the Editor owns; editor
   changes show when you play Meadow (now with a hill/tree background + plants). View-sized.
 - **Twin Peaks** (`twin`) — stone mesas over a chasm, swinging rope-bridge, crates, mountains + keep.

@@ -109,9 +109,12 @@
     const pairId = 'mb-' + String(candidate.candidateId || 'portal').replace(/[^a-zA-Z0-9_-]/g, '').slice(-18);
     const a = endpoints[0];
     const b = endpoints[1];
+    const radiusA = Math.max(60, Math.min(120, Math.round(a.r || 74)));
+    const radiusB = Math.max(60, Math.min(120, Math.round(b.r || 74)));
+    const color = '#3f6fa0';
     return {
-      a: { id: pairId + '-a', x: Math.round(a.x), y: Math.round(a.y), r: Math.max(30, Math.round(a.r || 46)), col: '#2f6fe0', link: pairId + '-b', source },
-      b: { id: pairId + '-b', x: Math.round(b.x), y: Math.round(b.y), r: Math.max(30, Math.round(b.r || 46)), col: '#2f6fe0', link: pairId + '-a', source },
+      a: { id: pairId + '-a', x: Math.round(a.x), y: Math.round(a.y), r: radiusA, col: color, link: pairId + '-b', source },
+      b: { id: pairId + '-b', x: Math.round(b.x), y: Math.round(b.y), r: radiusB, col: color, link: pairId + '-a', source },
     };
   }
 

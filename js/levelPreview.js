@@ -20,21 +20,12 @@
     projection: null,
     semanticDraft: null,
     visualObservation: null,
-    voiceSessions: [],
-    voiceEvents: [],
-    agentTurns: [],
-    proposals: [],
-    permissionRequests: [],
-    voiceSession: null,
-    voiceSocket: null,
-    mediaRecorder: null,
-    micStream: null,
-    micStatus: 'idle',
     socket: null,
     reconnectTimer: 0,
     activityTimer: 0,
     onActivity: null,
     onSemanticDraft: null,
+    onStageEdit: null,
     enterSeq: 0,
     selectionController: null,
   };
@@ -71,47 +62,6 @@
     return url.toString();
   }
 
-  function voiceSessionsUrl(backendUrl, roomId) {
-    const url = new URL(backendUrl.toString());
-    url.pathname = '/rooms/' + encodeURIComponent(roomId) + '/voice/sessions';
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  }
-
-  function voiceSessionUrl(backendUrl, roomId, sessionId) {
-    const url = new URL(backendUrl.toString());
-    url.pathname = '/rooms/' + encodeURIComponent(roomId) + '/voice/sessions/' + encodeURIComponent(sessionId);
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  }
-
-  function voiceWsUrl(backendUrl, roomId, sessionId) {
-    const url = new URL(backendUrl.toString());
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    url.pathname = '/ws/rooms/' + encodeURIComponent(roomId) + '/voice/' + encodeURIComponent(sessionId);
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  }
-
-  function proposalResolveUrl(backendUrl, roomId, proposalId) {
-    const url = new URL(backendUrl.toString());
-    url.pathname = '/rooms/' + encodeURIComponent(roomId) + '/proposals/' + encodeURIComponent(proposalId) + '/resolve';
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  }
-
-  function proposalAppliedUrl(backendUrl, roomId, proposalId) {
-    const url = new URL(backendUrl.toString());
-    url.pathname = '/rooms/' + encodeURIComponent(roomId) + '/proposals/' + encodeURIComponent(proposalId) + '/applied';
-    url.search = '';
-    url.hash = '';
-    return url.toString();
-  }
-
   function stageReferenceForWorld(world) {
     const mapId = world && (world.mapId || world.id);
     const stage = mapId && DS.Maps && DS.Store && DS.Store.data ? DS.Maps.stageFor(DS.Store.data, mapId) : null;
@@ -119,10 +69,78 @@
     return {
       view: { w: Math.max(1, bounds.x1 - bounds.x0), h: Math.max(1, bounds.y1 - bounds.y0), x: bounds.x0, y: bounds.y0 },
       bounds,
-      platforms: stage && Array.isArray(stage.platforms) ? DS.data.clone(stage.platforms) : [],
-      portals: stage && Array.isArray(stage.portals) ? DS.data.clone(stage.portals) : [],
+      platforms: addEditorIds(stage && Array.isArray(stage.platforms) ? DS.data.clone(stage.platforms) : [], 'platform'),
+      portals: addEditorIds(stage && Array.isArray(stage.portals) ? DS.data.clone(stage.portals) : [], 'portal'),
       spawns: stage && Array.isArray(stage.spawns) ? DS.data.clone(stage.spawns) : [],
+      decor: stage && Array.isArray(stage.decor) ? DS.data.clone(stage.decor) : [],
+      bg: stage && Array.isArray(stage.bg) ? DS.data.clone(stage.bg) : [],
     };
+  }
+
+  function itemEditorId(kind, item, index) {
+    if (!item) return '';
+    if (item.editorId || item.id) return String(item.editorId || item.id);
+    const source = item.source;
+    if (source && source.kind === 'magicboard_agent' && source.candidateId) return kind + '-candidate-' + source.candidateId;
+    if (kind === 'portal') return 'portal-' + index + '-' + Math.round(item.x || 0) + '-' + Math.round(item.y || 0) + '-' + Math.round(item.r || 0);
+    return 'platform-' + index + '-' + Math.round(item.x || 0) + '-' + Math.round(item.y || 0) + '-' + Math.round(item.w || 0) + '-' + Math.round(item.h || 0);
+  }
+
+  function addEditorIds(items, kind) {
+    return (items || []).map((item, index) => {
+      const copy = Object.assign({}, item);
+      if (!copy.editorId) copy.editorId = itemEditorId(kind, copy, index);
+      return copy;
+    });
+  }
+
+  function applyNumericPatch(target, patch, keys) {
+    keys.forEach((key) => {
+      if (Number.isFinite(patch[key])) target[key] = Math.round(patch[key]);
+    });
+  }
+
+  function applyStageEditToWorld(operation) {
+    const stage = stageForWorld();
+    if (!stage || !operation) return false;
+    const targetId = String(operation.targetId || '');
+    stage.platforms = stage.platforms || [];
+    stage.portals = stage.portals || [];
+    if (operation.type === 'add_platform') {
+      stage.platforms.push(DS.data.clone(operation.platform || {}));
+    } else if (operation.type === 'update_platform') {
+      const patch = operation.patch || {};
+      for (let i = 0; i < stage.platforms.length; i++) {
+        if (itemEditorId('platform', stage.platforms[i], i) === targetId) {
+          applyNumericPatch(stage.platforms[i], patch, ['x', 'y', 'w', 'h']);
+          break;
+        }
+      }
+    } else if (operation.type === 'delete_platform') {
+      stage.platforms = stage.platforms.filter((platform, index) => itemEditorId('platform', platform, index) !== targetId);
+    } else if (operation.type === 'add_portal_pair') {
+      const pair = operation.portalPair || {};
+      if (pair.a && pair.b) stage.portals.push(DS.data.clone(pair.a), DS.data.clone(pair.b));
+    } else if (operation.type === 'update_portal') {
+      const patch = operation.patch || {};
+      for (let i = 0; i < stage.portals.length; i++) {
+        if (itemEditorId('portal', stage.portals[i], i) === targetId) {
+          applyNumericPatch(stage.portals[i], patch, ['x', 'y', 'r']);
+          break;
+        }
+      }
+    } else if (operation.type === 'delete_portal_pair') {
+      let linked = null;
+      for (let i = 0; i < stage.portals.length; i++) {
+        const portal = stage.portals[i];
+        if (itemEditorId('portal', portal, i) === targetId) linked = new Set([portal.id, portal.link, portal.editorId].filter(Boolean).map(String));
+      }
+      if (linked) stage.portals = stage.portals.filter((portal) => ![portal.id, portal.link, portal.editorId].some((id) => linked.has(String(id))));
+    } else {
+      return false;
+    }
+    if (DS.Store && DS.Store.save) DS.Store.save();
+    return true;
   }
 
   function publishSelection(backendUrl, world, roomId) {
@@ -224,21 +242,7 @@
       if (confirmed) count.textContent = confirmed + ' object' + (confirmed === 1 ? '' : 's') + ' auto-applied';
       else count.textContent = total ? confirmed + '/' + total + ' confirmed' : 'Draw stage objects on the iPad';
     }
-    syncAgentUi();
-  }
-
-  function activeProposal() {
-    return (state.proposals || []).find((proposal) => proposal.approvalState === 'pending_approval' || proposal.approvalState === 'approved')
-      || (state.proposals || [])[state.proposals.length - 1]
-      || null;
-  }
-
-  function latestEvent(type) {
-    const events = state.voiceEvents || [];
-    for (let index = events.length - 1; index >= 0; index -= 1) {
-      if (!type || events[index].type === type) return events[index];
-    }
-    return null;
+    syncActionUi();
   }
 
   function launchReport() {
@@ -247,46 +251,14 @@
     return DS.MagicBoardGame.validateLaunchReady(mapId);
   }
 
-  function syncAgentUi() {
-    const statusEl = document.getElementById('level-agent-status');
-    const promptEl = document.getElementById('level-agent-prompt');
-    const transcriptEl = document.getElementById('level-agent-transcript');
-    const planEl = document.getElementById('level-agent-plan');
-    const permissionEl = document.getElementById('level-agent-permission');
-    const jobEl = document.getElementById('level-agent-job');
-    const micButton = document.getElementById('level-preview-mic');
+  function syncActionUi() {
     const applyButton = document.getElementById('level-preview-apply');
-    const rejectButton = document.getElementById('level-preview-reject');
     const playButton = document.getElementById('level-preview-play');
-    const session = state.voiceSession || (state.voiceSessions || []).find((item) => item.status && item.status !== 'ended') || null;
-    const proposal = activeProposal();
-    const latestTranscript = latestEvent('final') || latestEvent('partial');
-    const assistant = latestEvent('assistant_text');
-    const permission = (state.permissionRequests || []).find((item) => item.status === 'pending') || (state.permissionRequests || [])[state.permissionRequests.length - 1] || null;
-    const turn = (state.agentTurns || [])[state.agentTurns.length - 1] || null;
     const launch = launchReport();
-    if (statusEl) statusEl.textContent = session ? 'Voice ' + session.status : 'Voice ' + state.micStatus;
-    if (promptEl) promptEl.textContent = assistant ? assistant.transcript : 'No active prompt';
-    if (transcriptEl) transcriptEl.textContent = latestTranscript ? latestTranscript.transcript : 'Waiting for voice input.';
-    if (planEl) {
-      if (proposal && proposal.scenePlan) {
-        const missing = proposal.validationReport && proposal.validationReport.missingRequirements;
-        planEl.textContent = proposal.scenePlan.summary || proposal.scenePlan.title || ('Proposal ' + proposal.approvalState + (missing ? ' · missing ' + missing.join(', ') : ''));
-      } else {
-        planEl.textContent = 'No proposal yet.';
-      }
-    }
-    if (permissionEl) permissionEl.textContent = permission ? permission.riskSummary + ' · ' + permission.status : 'No permission request.';
-    if (jobEl) jobEl.textContent = turn ? (turn.status + (turn.toolCalls && turn.toolCalls.length ? ' · ' + turn.toolCalls.length + ' tools' : '')) : 'No active agent job.';
-    if (micButton) {
-      micButton.textContent = state.mediaRecorder ? 'Stop Mic' : 'Mic';
-      micButton.disabled = !state.enabled || !navigator.mediaDevices || !global.MediaRecorder;
-    }
     if (applyButton) {
       const hasConfirmed = !!(state.semanticDraft && (state.semanticDraft.candidates || []).some((candidate) => candidate.status === 'confirmed'));
-      applyButton.disabled = !(proposal && proposal.approvalState === 'pending_approval') && !hasConfirmed;
+      applyButton.disabled = !hasConfirmed;
     }
-    if (rejectButton) rejectButton.disabled = !(proposal && proposal.approvalState === 'pending_approval');
     if (playButton) {
       playButton.disabled = !launch.ok;
       playButton.title = launch.ok ? 'Launch this stage' : 'Missing: ' + launch.missing.join(', ');
@@ -342,11 +314,9 @@
       if (message.type === 'hello') {
         setStatus('connected');
         updateProjection(message.version || 0, message.projection || state.projection, message.semanticDraft || state.semanticDraft, message.visualObservation || state.visualObservation, null);
-        applyVoiceState(message);
       } else if (message.type === 'projection_updated') {
         setStatus('connected');
         updateProjection(message.version || state.version, message.projection || null, message.semanticDraft || null, message.visualObservation || state.visualObservation, message.updatedAt);
-        applyVoiceState(message);
       } else if (message.type === 'semantic_draft_updated') {
         setStatus('connected');
         updateProjection(message.version || state.version, state.projection, message.semanticDraft || null, state.visualObservation, null);
@@ -358,8 +328,13 @@
           message.visualObservation || state.visualObservation,
           null,
         );
-      } else if (message.type === 'voice_room_state_updated') {
-        applyVoiceState(message);
+      } else if (message.type === 'stage_edit_updated') {
+        setStatus('connected');
+        applyStageEditToWorld(message.operation);
+        state.version = message.version || state.version;
+        if (state.onStageEdit) state.onStageEdit(state.world, message);
+        syncUi();
+        publishSelection(new URL(state.backendUrl), state.world, state.roomId);
       }
     });
 
@@ -384,119 +359,6 @@
       state.socket = null;
       try { socket.close(); } catch (_error) {}
     }
-    stopVoiceSession();
-  }
-
-  function applyVoiceState(message) {
-    if (!message) return;
-    if (Array.isArray(message.voiceSessions)) state.voiceSessions = message.voiceSessions;
-    if (Array.isArray(message.voiceEvents)) {
-      const byId = new Map((state.voiceEvents || []).map((event) => [event.eventId, event]));
-      message.voiceEvents.forEach((event) => byId.set(event.eventId, event));
-      state.voiceEvents = Array.from(byId.values()).slice(-40);
-    }
-    if (Array.isArray(message.agentTurns)) state.agentTurns = message.agentTurns;
-    if (Array.isArray(message.proposals)) state.proposals = message.proposals;
-    if (Array.isArray(message.permissionRequests)) state.permissionRequests = message.permissionRequests;
-    if (state.voiceSession) {
-      state.voiceSession = state.voiceSessions.find((session) => session.sessionId === state.voiceSession.sessionId) || state.voiceSession;
-    }
-    syncUi();
-  }
-
-  async function startVoiceSession() {
-    if (!state.enabled || state.mediaRecorder || !global.fetch) return;
-    state.micStatus = 'starting';
-    syncUi();
-    try {
-      const response = await fetch(voiceSessionsUrl(state.backendUrl, state.roomId), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          clientId: 'desktop-level-preview',
-          worldId: state.world && (state.world.id || state.world.mapId),
-        }),
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null);
-        throw new Error((body && body.detail && body.detail.message) || 'Voice session failed: ' + response.status);
-      }
-      const session = await response.json();
-      state.voiceSession = session;
-      state.voiceSessions = state.voiceSessions.filter((item) => item.sessionId !== session.sessionId).concat([session]);
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      state.micStream = stream;
-      const socket = new WebSocket(voiceWsUrl(state.backendUrl, state.roomId, session.sessionId));
-      state.voiceSocket = socket;
-      socket.binaryType = 'arraybuffer';
-      socket.addEventListener('open', () => {
-        const recorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : undefined });
-        state.mediaRecorder = recorder;
-        recorder.addEventListener('dataavailable', (event) => {
-          if (event.data && event.data.size && socket.readyState === WebSocket.OPEN) socket.send(event.data);
-        });
-        recorder.start(250);
-        state.micStatus = 'listening';
-        syncUi();
-      });
-      socket.addEventListener('close', () => {
-        stopVoiceSession(false);
-      });
-    } catch (error) {
-      console.warn('voice start failed', error);
-      state.micStatus = error && error.message ? error.message : 'mic error';
-      stopVoiceSession(false);
-      syncUi();
-    }
-  }
-
-  function stopVoiceSession(sendStop) {
-    if (sendStop !== false && state.voiceSocket && state.voiceSocket.readyState === WebSocket.OPEN) {
-      try { state.voiceSocket.send(JSON.stringify({ type: 'stop' })); } catch (_error) {}
-    }
-    if (state.mediaRecorder) {
-      try { state.mediaRecorder.stop(); } catch (_error) {}
-      state.mediaRecorder = null;
-    }
-    if (state.micStream) {
-      state.micStream.getTracks().forEach((track) => track.stop());
-      state.micStream = null;
-    }
-    if (state.voiceSocket) {
-      const socket = state.voiceSocket;
-      state.voiceSocket = null;
-      try { socket.close(); } catch (_error) {}
-    }
-    if (state.voiceSession && global.fetch) {
-      fetch(voiceSessionUrl(state.backendUrl, state.roomId, state.voiceSession.sessionId), { method: 'DELETE' }).catch(() => {});
-    }
-    state.micStatus = 'idle';
-    syncUi();
-  }
-
-  async function resolveActiveProposal(approved) {
-    const proposal = activeProposal();
-    if (!proposal || !global.fetch) return null;
-    const response = await fetch(proposalResolveUrl(state.backendUrl, state.roomId, proposal.proposalId), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ approved }),
-    });
-    if (!response.ok) throw new Error('Proposal update failed: ' + response.status);
-    const updated = await response.json();
-    state.proposals = state.proposals.map((item) => item.proposalId === updated.proposalId ? updated : item);
-    syncUi();
-    return updated;
-  }
-
-  async function markActiveProposalApplied(proposalId) {
-    if (!proposalId || !global.fetch) return;
-    const response = await fetch(proposalAppliedUrl(state.backendUrl, state.roomId, proposalId), { method: 'POST' });
-    if (response.ok) {
-      const updated = await response.json();
-      state.proposals = state.proposals.map((item) => item.proposalId === updated.proposalId ? updated : item);
-      syncUi();
-    }
   }
 
   function enter(world, options) {
@@ -518,15 +380,9 @@
     state.projection = saved ? saved.projection : null;
     state.semanticDraft = null;
     state.visualObservation = null;
-    state.voiceSessions = [];
-    state.voiceEvents = [];
-    state.agentTurns = [];
-    state.proposals = [];
-    state.permissionRequests = [];
-    state.voiceSession = null;
-    state.micStatus = 'idle';
     state.onActivity = options.onActivity || null;
     state.onSemanticDraft = options.onSemanticDraft || null;
+    state.onStageEdit = options.onStageEdit || null;
     syncUi();
     publishSelection(backend, world, state.roomId);
     if (saved) {
@@ -561,6 +417,7 @@
     state.semanticDraft = null;
     state.visualObservation = null;
     state.onSemanticDraft = null;
+    state.onStageEdit = null;
     syncUi();
     if (shouldClearSelection) clearSelection(backendUrl);
   }
@@ -831,10 +688,5 @@
     render,
     saveCapture,
     state,
-    startVoiceSession,
-    stopVoiceSession,
-    resolveActiveProposal,
-    markActiveProposalApplied,
-    activeProposal,
   };
 })(window);

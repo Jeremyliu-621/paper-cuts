@@ -125,8 +125,12 @@
 
   // ---- maps ----------------------------------------------------------------
   const Maps = {
-    _order: ['meadow', 'twin', 'loft', 'quarry', 'ruins', 'crates', 'bounce', 'cannons', 'portals', 'chaos'],
+    _order: ['demo', 'meadow', 'twin', 'loft', 'quarry', 'ruins', 'crates', 'bounce', 'cannons', 'portals', 'chaos'],
     defs: {
+      demo: {
+        id: 'demo', name: 'Demo', editable: true,
+        desc: 'The original Doodle Smash menu flow stage: simple ground, two fighters, and the classic lobby setup.',
+      },
       meadow: {
         id: 'meadow', name: 'Meadow', editable: true,
         desc: 'A sunny field with rolling hills, trees and a flower-strewn ground. The stage the Editor edits.',
@@ -498,7 +502,18 @@
       if (!this.isCustom(id)) return null;
       if (!data.stages) data.stages = {};
       if (!data.stages[id]) data.stages[id] = this.stageFromDraft(draft, name);
-      else if (name) data.stages[id].name = name;
+      else {
+        if (name) data.stages[id].name = name;
+        if (draft && typeof draft === 'object') {
+          const next = this.stageFromDraft(draft, name || data.stages[id].name);
+          data.stages[id].platforms = next.platforms;
+          data.stages[id].portals = next.portals;
+          data.stages[id].spawns = next.spawns;
+          data.stages[id].decor = next.decor;
+          data.stages[id].bg = next.bg;
+          data.stages[id].bounds = next.bounds;
+        }
+      }
       return data.stages[id];
     },
     has(id) { return !!this.defs[id] || this.isCustom(id); },

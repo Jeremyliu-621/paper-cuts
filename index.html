@@ -20,6 +20,7 @@
     d.textContent='JS error(s):\n'+window.__errs.join('\n');
   }
   window.addEventListener('error', function(e){
+    if ((e.message === 'Script error.' || !e.message) && !e.filename && window.__dsSuppressOpaqueScriptErrorsUntil && Date.now() < window.__dsSuppressOpaqueScriptErrorsUntil) return;
     __showErr((e.message||'error')+'  @ '+(e.filename||'').split('/').pop()+':'+e.lineno);
   });
   window.addEventListener('unhandledrejection', function(e){ __showErr('promise: '+(e.reason&&e.reason.message||e.reason)); });
@@ -74,39 +75,11 @@
           <div class="level-preview-actions">
             <button id="level-preview-draw" class="level-preview-button secondary">Open Draw</button>
             <button id="level-preview-apply" class="level-preview-button">Auto Apply</button>
-            <button id="level-preview-reject" class="level-preview-button secondary">Reject Proposal</button>
             <button id="level-preview-play" class="level-preview-button secondary">Play Now</button>
             <button id="level-preview-save" class="level-preview-button">Save</button>
             <button id="level-preview-library" class="level-preview-button secondary">Library</button>
           </div>
         </div>
-        <section class="level-agent-panel" aria-label="Voice agent">
-          <div class="level-agent-head">
-            <button id="level-preview-mic" class="level-preview-button secondary" type="button">Mic</button>
-            <div>
-              <strong id="level-agent-status">Voice idle</strong>
-              <span id="level-agent-prompt">No active prompt</span>
-            </div>
-          </div>
-          <div class="level-agent-grid">
-            <div>
-              <span>Transcript</span>
-              <p id="level-agent-transcript">Waiting for voice input.</p>
-            </div>
-            <div>
-              <span>Scene Plan</span>
-              <p id="level-agent-plan">No proposal yet.</p>
-            </div>
-            <div>
-              <span>Permission</span>
-              <p id="level-agent-permission">No permission request.</p>
-            </div>
-            <div>
-              <span>Job</span>
-              <p id="level-agent-job">No active agent job.</p>
-            </div>
-          </div>
-        </section>
       </div>
 
       <!-- Setup page: pick a game mode + map (icon tiles, minimal text) -->
@@ -200,7 +173,7 @@
   <script>
     (function () {
       // union of both branches: friend's MagicBoard creation modules + our AI/graph/draw modules. main last.
-      var files = ['rng', 'draw', 'stageReferenceData', 'data', 'character', 'skin', 'effects', 'audio', 'input', 'physics',
+      var files = ['rng', 'draw', 'stageReferenceData', 'data', 'character', 'skin', 'finishers', 'ultimateRecorder', 'effects', 'audio', 'input', 'physics',
         'fighter', 'stage', 'modes', 'game', 'net', 'editor', 'createOverlay', 'levelPreview', 'worldLibrary', 'magicBoardGame',
         'mechanics', 'graph', 'prop', 'ai', 'drawpad', 'campad', 'main'];
       var http = location.protocol === 'http:' || location.protocol === 'https:';

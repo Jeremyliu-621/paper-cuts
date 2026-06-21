@@ -50,7 +50,7 @@
       this.view = d.view;
       // resolve the selected mode + map (default Smash on the editable Meadow stage)
       this.modeId = this.modeId || 'smash';
-      this.mapId = this.mapId || 'meadow';
+      this.mapId = this.mapId || 'demo';
       this.mode = DS.Modes.get(this.modeId);
       // play a CLONE of the map's editable+persistent stage, so a match (moving platforms,
       // cannon timers, breakable crates, portal cooldowns) never mutates the saved stage
@@ -306,7 +306,15 @@
       }
     }
 
-    start() { if (this.state !== 'playing') { if (this.state === 'over' || this.state === 'outro' || this.state === 'victory' || this.winner) this.rebuild(); this.state = 'playing'; } }
+    start() {
+      if (this.state !== 'playing') {
+        if (this.state === 'over' || this.state === 'outro' || this.state === 'victory' || this.winner) this.rebuild();
+        if (DS.Finishers) DS.Finishers.preloadForGame(this);
+        this._finisherPollT = 0;
+        this._finisherPolling = false;
+        this.state = 'playing';
+      }
+    }
     togglePause() { if (this.state === 'playing') this.state = 'paused'; else if (this.state === 'paused') this.state = 'playing'; }
 
     // a winner has been decided — but the match doesn't slam to a halt. enter the OUTRO:
@@ -338,10 +346,54 @@
       this.endMatch(w);
     }
 
+    tryStartFinisher(victim, world) {
+      if (!DS.Finishers || this.state !== 'playing' || this.finisher) return false;
+      const mode = this.mode;
+      if (mode && mode.elimination === false) return false;
+      if (!victim || victim.stocks > 1) return false;
+      const attacker = victim.lastHitBy;
+      if (!attacker || attacker === victim || attacker.dead) return false;
+      if (!victim.lastHitWasUltimate) return false;
+      const clip = DS.Finishers.findReadyClip(attacker, victim);
+      if (!clip) return false;
+      const video = DS.Finishers.videoForClip(clip);
+      if (!video) return false;
+      this.finisher = { victim, world, attacker, clip, video, t: 0, maxT: 6.5, done: false };
+      this.state = 'finisher';
+      this.effects.hitstopT = 0;
+      this.effects.shake(0.45);
+      try { video.pause(); video.currentTime = 0; } catch (_error) { /* ignore stale media seek errors */ }
+      video.onended = () => this._completeFinisher();
+      video.onerror = () => this._completeFinisher();
+      const played = video.play();
+      if (played && played.catch) played.catch(() => this._completeFinisher());
+      return true;
+    }
+
+    _completeFinisher() {
+      const finisher = this.finisher;
+      if (!finisher || finisher.done) return;
+      finisher.done = true;
+      try { finisher.video.pause(); } catch (_error) { /* ignore media cleanup errors */ }
+      this.finisher = null;
+      this.state = 'playing';
+      if (finisher.victim && finisher.victim._completeKO) finisher.victim._completeKO(finisher.world);
+    }
+
     update(dt, input) {
       // global controls
       if (DS.Input.pressed('Enter')) { if (this.state === 'ready' || this.state === 'over' || this.state === 'victory') this.start(); }
       if (DS.Input.pressed('KeyP')) this.togglePause();
+
+      if (this.state === 'finisher') {
+        if (this.finisher) {
+          this.finisher.t += Math.min(dt, 0.05);
+          const video = this.finisher.video;
+          if (video.ended || this.finisher.t > this.finisher.maxT) this._completeFinisher();
+        }
+        this.effects.update(dt);
+        return;
+      }
 
       // brush wipe: sim parked, advance the wipe + the (revealing) victory animation
       if (this.state === 'wipe') {
@@ -363,6 +415,7 @@
         return;
       }
       this._updateStage(dt);
+      this._pollFinishers(dt);
       if (this.demo) {
         this._aiT = (this._aiT || 0) + dt;
         for (const f of this.fighters) f.update(dt, this._ai(f), this.world);
@@ -385,6 +438,22 @@
         this.outroT -= dt;
         this.winFlash = Math.max(0, (this.winFlash || 0) - dt * 0.7);
         if (this.outroT <= 0) this._beginWipe();
+      }
+    }
+
+    _pollFinishers(dt) {
+      if (!DS.Finishers || !DS.Finishers.refreshPendingForGame || this._finisherPolling) return;
+      this._finisherPollT = (this._finisherPollT || 0) - dt;
+      if (this._finisherPollT > 0) return;
+      this._finisherPollT = 2.2;
+      this._finisherPolling = true;
+      const done = () => { this._finisherPolling = false; if (DS.Finishers) DS.Finishers.preloadForGame(this); };
+      try {
+        const result = DS.Finishers.refreshPendingForGame(this);
+        if (result && result.then) result.then(done, done);
+        else done();
+      } catch (_error) {
+        done();
       }
     }
 
@@ -594,7 +663,7 @@
       for (const f of this.fighters) {
         if (f === pr.owner || f.dead || f.respawnT > 0 || f.invuln > 0 || pr.hits.has(f)) continue;
         if (Math.abs(f.x - pr.x) < f.w / 2 + pr.r && Math.abs(f.y - pr.y) < f.h / 2 + pr.r) {
-          pr.hits.add(f); f._takeHit(cfg, pr.vx >= 0 ? 1 : -1, pr.owner, this.world);
+          pr.hits.add(f); f._takeHit(Object.assign({ ult: true }, cfg), pr.vx >= 0 ? 1 : -1, pr.owner, this.world);
           this.effects.ultHit(pr.x, pr.y, 1.5, pr.owner && pr.owner.tagCol); this.effects.hitstop(0.12);
         }
       }
@@ -729,8 +798,51 @@
       // brush-wipe transition: paints the live game away to reveal the victory screen
       if (this.state === 'wipe') { this._renderWipe(ctx, cssW, cssH); return; }
       this._renderScene(ctx);
+      if (this.state === 'finisher') this._renderFinisherOverlay(ctx, cssW, cssH);
       // the win-moment darkening veil rides over the live game during the outro
       if (this.state === 'outro') this._outroVeil(ctx, cssW, cssH);
+    }
+
+    _renderFinisherOverlay(ctx, cssW, cssH) {
+      const finisher = this.finisher;
+      if (!finisher) return;
+      const t = Math.min(1, finisher.t / 0.18);
+      const panelW = Math.min(cssW * 0.82, cssH * 1.18);
+      const panelH = Math.min(cssH * 0.76, panelW * 0.72);
+      const x = (cssW - panelW) / 2, y = (cssH - panelH) / 2;
+      const rnd = DS.makeRng(331);
+      ctx.save();
+      ctx.globalAlpha = t;
+      ctx.fillStyle = 'rgba(28,24,21,.58)';
+      ctx.fillRect(0, 0, cssW, cssH);
+      ctx.translate(x, y);
+      D.roundedRect(ctx, 0, 0, panelW, panelH, 8, { width: 5, color: D.COL.ink, rnd, fill: D.COL.paper });
+      D.line(ctx, 14, 18, panelW - 12, 12, { width: 2.5, color: D.COL.inkSoft, rnd, passes: 1 });
+      D.line(ctx, 18, panelH - 16, panelW - 18, panelH - 22, { width: 2.5, color: D.COL.inkSoft, rnd, passes: 1 });
+      const pad = 22, vw = panelW - pad * 2, vh = panelH - pad * 2;
+      const video = finisher.video;
+      if (video && video.readyState >= 2) {
+        try {
+          const ar = (video.videoWidth || 16) / (video.videoHeight || 9);
+          let dw = vw, dh = dw / ar;
+          if (dh > vh) { dh = vh; dw = dh * ar; }
+          ctx.drawImage(video, pad + (vw - dw) / 2, pad + (vh - dh) / 2, dw, dh);
+        } catch (_error) {
+          this._renderFinisherFallback(ctx, panelW, panelH, finisher);
+        }
+      } else {
+        this._renderFinisherFallback(ctx, panelW, panelH, finisher);
+      }
+      ctx.restore();
+    }
+
+    _renderFinisherFallback(ctx, panelW, panelH, finisher) {
+      ctx.save();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = D.COL.ink;
+      ctx.font = '34px "Gloria Hallelujah", cursive';
+      ctx.fillText((finisher.clip && finisher.clip.style ? finisher.clip.style : 'Finisher') + ' KO', panelW / 2, panelH / 2);
+      ctx.restore();
     }
 
     // dark wash that flares as the winner is decided then settles — "someone just won"

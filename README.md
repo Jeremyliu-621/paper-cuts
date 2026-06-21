@@ -17,14 +17,14 @@ draw tool, how to extend things, and the dev workflow.
 Just open `index.html` in a browser (double-click it, or drag it into Chrome).
 No server or install needed.
 
-### MagicBoard voice editing
+### MagicBoard drawing
 
-Local desktop testing can stay on HTTP:
+Local desktop and iPad testing can stay on HTTP:
 
 ```bash
 cd backend
 cp .env.example .env
-# fill OPENAI_API_KEY, MAGICBOARD_VLM_MODEL, DEEPGRAM_API_KEY
+# fill OPENAI_API_KEY and MAGICBOARD_VLM_MODEL for VLM classification
 uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 cd ../draw-client
@@ -36,25 +36,9 @@ npm install
 npm start
 ```
 
-iPad microphone capture requires HTTPS unless you are on localhost. Create a trusted local cert, then point all three dev servers at the same cert/key paths:
+Open the desktop game with `?backend=http://YOUR-LAN-IP:8000&drawClient=http://YOUR-LAN-IP:5173/`, then open the draw client on the iPad. The flow is doodle first: VLM classification can auto-confirm platform/spike/etc. candidates, and the iPad manual choice menu is the fallback when classification fails or is unavailable.
 
-```bash
-export MAGICBOARD_TLS_CERT=/path/to/localhost+lan.pem
-export MAGICBOARD_TLS_KEY=/path/to/localhost+lan-key.pem
-
-cd backend
-uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000 \
-  --ssl-certfile "$MAGICBOARD_TLS_CERT" \
-  --ssl-keyfile "$MAGICBOARD_TLS_KEY"
-
-cd ../draw-client
-VITE_BACKEND_URL=https://YOUR-LAN-IP:8000 npm run dev -- --host 0.0.0.0
-
-cd ..
-PORT=8080 npm start
-```
-
-Then open the desktop game with `?backend=https://YOUR-LAN-IP:8000&drawClient=https://YOUR-LAN-IP:5173/`. Provider keys belong only in `backend/.env`; do not put OpenAI or Deepgram keys in `draw-client/.env`.
+Provider keys belong only in `backend/.env`; do not put OpenAI keys in `draw-client/.env`.
 
 ### Phone controllers (optional)
 To let people **join by scanning a QR code** and use their phone as a controller (a landscape

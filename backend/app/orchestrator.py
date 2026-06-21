@@ -85,7 +85,7 @@ def tool_definitions() -> list[dict[str, Any]]:
             "description": "Request explicit user permission before risky actions.",
             "parameters": _json_schema(
                 {
-                    "action": {"type": "string", "enum": ["apply_patch", "replace_generated", "remove_generated", "delete_manual_content", "end_other_voice_session"]},
+                    "action": {"type": "string", "enum": ["apply_patch", "replace_generated", "remove_generated", "delete_manual_content"]},
                     "arguments": {"type": "object", "additionalProperties": True},
                     "riskSummary": {"type": "string"},
                     "requiredVersionRefs": {"type": "object", "properties": version_refs, "additionalProperties": False},
@@ -332,7 +332,7 @@ class AgentOrchestrator:
                     "type": "clarification_answer",
                     **args,
                     "worldId": self.registry.get_room(room_id).world_id,
-                    "clientId": "voice-agent",
+                    "clientId": "semantic-agent",
                 }
             )
             update = self.registry.store_answer(room_id, message)
