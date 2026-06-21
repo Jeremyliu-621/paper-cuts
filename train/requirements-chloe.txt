@@ -1,0 +1,27 @@
+# CHLOE — Trainium / Neuron box pip deps for the SFT-LoRA fine-tune (train/train_chloe_sft.py).
+#
+# ENV: the AWS Neuron / Trainium box ONLY, inside the workshop venv
+#         source /opt/aws_neuronx_venv_pytorch/bin/activate   # aws_neuronx_venv_pytorch
+#      No CUDA. These go ON TOP of the workshop's existing Neuron SDK.
+#
+# IMPORTANT: torch-neuronx, neuronx-cc, torch_xla, libneuronxla and the aws-neuronx-*
+# runtime/tools come PRE-INSTALLED in aws_neuronx_venv_pytorch. We do NOT pin or
+# reinstall them here — doing so can break the matched runtime/compiler/driver set.
+# RULE: pip must NOT up/downgrade torch / torch-neuronx / torch_xla. If it tries to,
+# stop and report (the SDK runtime/compiler/driver set must stay matched).
+#
+# Install (inside the venv, with the Neuron pip index already configured by the env):
+#     pip install -r train/requirements-chloe.txt
+#
+# We do NOT hard-pin optimum-neuron to an old release — that would fight the pre-installed
+# torch-neuronx. Let pip resolve a version compatible with the installed SDK, and let
+# optimum-neuron pull its own matched transformers / trl range.
+
+optimum-neuron        # NeuronSFTTrainer + NeuronSFTConfig (Trainium-aware SFT-LoRA)
+peft                  # LoraConfig — the LoRA adapter we attach to Qwen2.5-1.5B-Instruct
+datasets              # load_dataset("json", ...) for data/chloe_pairs.jsonl
+trl                   # SFTTrainer/SFTConfig base that NeuronSFTTrainer extends (pulled via optimum-neuron, pinned here for clarity)
+accelerate            # training/loader helpers used under the hood
+transformers          # AutoTokenizer + base model load (let optimum-neuron pin its matched range)
+safetensors           # adapter_model.safetensors serialization
+sentencepiece         # tokenizer backend for the Qwen2.5 instruct model

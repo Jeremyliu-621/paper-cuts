@@ -13,6 +13,7 @@
 
   const AI = {
     endpoint: null,   // CAELLUM /enhance URL; null = placeholder only
+    chloeEndpoint: null, // CHLOE /mechanic URL; null = default (instant) mechanic only
     SIZE: 512,        // rasterized sketch size sent to /enhance (matches the compiled shape)
 
     // set the CAELLUM endpoint and ping its health
@@ -22,6 +23,16 @@
       fetch(base + '/healthz').then(function (r) { return r.json(); })
         .then(function (h) { console.log('[DS.AI] CAELLUM connected:', h); })
         .catch(function (e) { if (global.__showErr) global.__showErr('CAELLUM /healthz failed: ' + (e && e.message || e)); });
+      return url;
+    },
+
+    // set the CHLOE /mechanic endpoint and ping its health (mirrors connect()/endpoint above)
+    connectChloe: function (url) {
+      this.chloeEndpoint = url;
+      const base = url.replace(/\/mechanic\/?$/, '');
+      fetch(base + '/healthz').then(function (r) { return r.json(); })
+        .then(function (h) { console.log('[DS.AI] CHLOE connected:', h); })
+        .catch(function (e) { if (global.__showErr) global.__showErr('CHLOE /healthz failed: ' + (e && e.message || e)); });
       return url;
     },
 
@@ -37,6 +48,7 @@
       }, opts));
       game.props.push(prop);
       if (this.endpoint) this._enhanceInto(prop, stripDataUrl(this._rasterizeUrl(strokes)), label);
+      if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
       return prop;
     },
 
@@ -44,12 +56,14 @@
     // placeholder until the enhanced one returns.
     spawnFromImage: function (dataUrl, label, x, y, opts) {
       const game = DS.game; if (!game || !game.props) return null;
-      const prop = new DS.Prop(Object.assign({ label: label, x: x, y: y }, opts || {}));
+      opts = opts || {};
+      const prop = new DS.Prop(Object.assign({ label: label, x: x, y: y }, opts));
       const rough = new Image();
       rough.onload = function () { if (!prop.enhanced) prop.sprite = rough; };
       rough.src = dataUrl;
       game.props.push(prop);
       if (this.endpoint) this._enhanceInto(prop, stripDataUrl(dataUrl), label);
+      if (this.chloeEndpoint) this._mechanicInto(prop, label, opts.description);
       return prop;
     },
 
@@ -66,6 +80,24 @@
           img.src = 'data:image/png;base64,' + out.sprite_b64;
         })
         .catch(function (e) { if (global.__showErr) global.__showErr('CAELLUM enhance failed: ' + (e && e.message || e)); });
+    },
+
+    // POST the label to CHLOE and, on success, UPGRADE the prop's mechanic in place. Progressive
+    // enhancement, same shape as the sprite swap: the default (instant) mechanic plays until CHLOE's
+    // tuned spec arrives (~1-2s later) and replaces it. Never throws into the spawn path.
+    _mechanicInto: function (prop, label, description) {
+      const body = { label: label };
+      if (description) body.description = description;
+      fetch(this.chloeEndpoint, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(function (r) { return r.json(); })
+        .then(function (spec) {
+          if (!spec || !spec.node) throw new Error((spec && spec.error) || 'no node in response');
+          const mech = specToMechanic(spec);
+          if (mech) { prop.mechanic = mech; prop.archetype = mech.archetype; }
+        })
+        .catch(function (e) { if (global.__showErr) global.__showErr('CHLOE mechanic failed: ' + (e && e.message || e)); });
     },
 
     // strokes -> data-URL PNG (white bg, SIZE x SIZE): the rough sketch CAELLUM enhances.
@@ -98,6 +130,33 @@
 
   // --- helpers ---
   function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+
+  // CHLOE spec {node, params, name, flavor} -> a DS.Prop.fire() mechanic cfg (same shape as
+  // DS.Mechanics.DEFAULTS). The spec is already CLAMPED server-side by config.clamp_spec(); this
+  // is a pure rename of node->kind, no new gameplay numbers. Returns null for nodes that aren't a
+  // held-item mechanic (hazard/bouncy are Track-B environment placement, not a fired prop) so the
+  // default mechanic is left untouched. Mirrors the DS.Mechanics archetype->kind knowledge.
+  function specToMechanic(spec) {
+    const node = spec.node, p = spec.params || {};
+    // projectile_weapon/throwable params ARE the engine projectile cfg -> fire() spawns it directly.
+    if (node === 'projectile_weapon' || node === 'throwable') {
+      return Object.assign({ kind: 'ranged', archetype: node === 'throwable' ? 'throwable' : 'ranged_weapon' }, p);
+    }
+    // melee: the spec carries {reach,...} but the engine slash needs {r,speed,life}. Map reach->r and
+    // keep the demo-tuned speed/life so the short fast strike still reads (DS.Mechanics.DEFAULTS).
+    if (node === 'melee_weapon') {
+      const base = (DS.Mechanics && DS.Mechanics.DEFAULTS && DS.Mechanics.DEFAULTS.melee_weapon) || {};
+      return Object.assign({}, base, p, {
+        kind: 'ranged', archetype: 'melee_weapon',
+        r: p.reach != null ? p.reach : base.r,
+        speed: base.speed, life: base.life, gravity: base.gravity || 0,
+      });
+    }
+    if (node === 'heal') return { kind: 'heal', archetype: 'heal', amount: p.amount, cooldown: 0 };
+    if (node === 'buff') return { kind: 'buff', archetype: 'buff', effect: p.effect, dur: p.dur, cooldown: 0 };
+    // hazard/bouncy/anything else: not a held-and-fired mechanic — keep the default.
+    return null;
+  }
   function stripDataUrl(u) { const i = u.indexOf(','); return i >= 0 ? u.slice(i + 1) : u; }
   function bbox(strokes) {
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;

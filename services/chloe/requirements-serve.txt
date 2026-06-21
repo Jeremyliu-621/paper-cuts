@@ -1,0 +1,16 @@
+# CHLOE serve deps. Two backends; install only what your --backend needs.
+#
+# Always (the HTTP server itself):
+starlette>=0.37
+uvicorn>=0.29
+
+# --backend claude (default): the Anthropic API teacher. Reads ANTHROPIC_API_KEY.
+#   This is all you need to serve from the API — no torch/Neuron.
+anthropic>=0.40
+
+# --backend local: the trained student (config.BASE_MODEL + the LoRA adapter).
+#   Heavy ML deps — install these ONLY when serving the local model.
+transformers>=4.44
+peft>=0.11
+torch>=2.1
+accelerate>=0.30
