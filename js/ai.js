@@ -144,6 +144,11 @@
   // mechanics (Track B: DS.Prop.handleEnvironment acts on them — a drawn spike trap / launch pad),
   // everything else maps to a held-item mechanic. Mirrors the DS.Mechanics archetype->kind knowledge.
   function specToMechanic(spec) {
+    // composable GRAPH spec (CHLOE's new format: {name,flavor,tags,on}) -> use it directly as the
+    // mechanic; DS.Prop.fire runs it via DS.Graph. Falls through to the legacy node mapping below.
+    if (spec && spec.on && DS.Graph && DS.Graph.isGraph(spec)) {
+      return Object.assign({ kind: 'graph', archetype: 'graph' }, spec);
+    }
     const node = spec.node, p = spec.params || {};
     // projectile_weapon/throwable params ARE the engine projectile cfg -> fire() spawns it directly.
     if (node === 'projectile_weapon' || node === 'throwable') {

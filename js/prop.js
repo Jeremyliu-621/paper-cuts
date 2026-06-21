@@ -78,6 +78,13 @@
     if (this.cooldown > 0 || !this.held) return;
     const f = this.held, m = this.mechanic;
     this.cooldown = m.cooldown || 0.3;
+    // composable mechanic GRAPH: run its `fire` trigger (projectiles it spawns carry on.hit/on.land).
+    if (DS.Graph && DS.Graph.isGraph(m)) {
+      DS.Graph.run(m, 'fire', { world: world, holder: f, aimDeg: aimDeg || 0,
+        x: f.x + f.facing * 30, y: f.y - 6, facing: f.facing, attachTriggers: true });
+      if (world.effects) world.effects.dust(f.x + f.facing * 40, f.y, f.facing);
+      return;
+    }
     if (m.kind === 'ranged') {
       if (world.spawnProjectile) world.spawnProjectile(f, m, aimDeg || 0);
       if (world.effects) world.effects.dust(f.x + f.facing * 40, f.y, f.facing);
@@ -140,6 +147,11 @@
         if (Math.abs(f.x - p.x) < (f.w + p.w) / 2 && Math.abs(f.y - p.y) < (f.h + p.h) / 2) {
           f.heldProp = p; p.held = f; p.vx = 0; p.vy = 0;
           if (game.effects) game.effects.charge(f.x, f.y - 6, f.tagCol);
+          // graph `pickup` trigger (heal/buff/shield). A pure consumable (no `fire`) is used up at once.
+          if (DS.Graph && DS.Graph.isGraph(p.mechanic) && p.mechanic.on && p.mechanic.on.pickup) {
+            DS.Graph.run(p.mechanic, 'pickup', { world: game.world, holder: f, x: f.x, y: f.y, facing: f.facing });
+            if (!p.mechanic.on.fire) { f.heldProp = null; p.held = null; p.dead = true; }
+          }
           break;
         }
       }

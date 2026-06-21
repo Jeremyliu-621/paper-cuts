@@ -33,6 +33,18 @@
   function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
   function alive(f, holder) { return f && !f.dead && f.respawnT <= 0 && f !== holder; }
 
+  // when a graph FIRES projectiles, stamp them with the graph's hit/land triggers + element tags, so
+  // the engine can run on.hit when they strike a fighter and on.land when they die (bomb arcs ->
+  // explodes). Only the `fire` trigger sets attachTriggers, so hit/land effects don't re-propagate.
+  function attach(cfg, ctx) {
+    if (ctx && ctx.attachTriggers && ctx.graph && ctx.graph.on) {
+      if (Array.isArray(ctx.graph.on.hit)) cfg.onHit = ctx.graph.on.hit;
+      if (Array.isArray(ctx.graph.on.land)) cfg.onLand = ctx.graph.on.land;
+      if (ctx.graph.tags && ctx.graph.tags.length) cfg.tags = ctx.graph.tags;
+    }
+    return cfg;
+  }
+
   // a clamped engine projectile cfg from an effect's params (+ modifiers). The engine reads these.
   function projCfg(c) {
     return {
@@ -54,16 +66,16 @@
   const EFFECTS = {
     // -- ranged / projectile family --------------------------------------------------------
     projectile(c, ctx) {
-      const w = ctx.world; if (w && w.spawnProjectile && ctx.holder) w.spawnProjectile(ctx.holder, projCfg(c), ctx.aimDeg || 0);
+      const w = ctx.world; if (w && w.spawnProjectile && ctx.holder) w.spawnProjectile(ctx.holder, attach(projCfg(c), ctx), ctx.aimDeg || 0);
     },
     spread(c, ctx) {                          // N projectiles fanned across an arc (shotgun / multishot)
       const w = ctx.world; if (!w || !w.spawnProjectile || !ctx.holder) return;
-      const n = int(c.count, 2, 9, 3), arc = num(c.arc, 0, 90, 24), base = projCfg(c);
+      const n = int(c.count, 2, 9, 3), arc = num(c.arc, 0, 90, 24), base = attach(projCfg(c), ctx);
       for (let i = 0; i < n; i++) w.spawnProjectile(ctx.holder, base, (ctx.aimDeg || 0) + ((n === 1 ? 0.5 : i / (n - 1)) - 0.5) * arc);
     },
     nova(c, ctx) {                            // N projectiles in a full 360° ring (bomb burst, star nova)
       const w = ctx.world; if (!w || !w.spawnProjectileAt || !ctx.holder) return;
-      const n = int(c.count, 3, 16, 8), base = projCfg(c);
+      const n = int(c.count, 3, 16, 8), base = attach(projCfg(c), ctx);
       for (let i = 0; i < n; i++) w.spawnProjectileAt(ctx.holder, base, (i / n) * Math.PI * 2);
     },
     beam(c, ctx) {                            // instant hitscan line from origin along aim (laser/railgun)
@@ -164,7 +176,7 @@
     },
     summon(c, ctx) {                          // spawn N autonomous homing projectiles ("minions")
       const w = ctx.world; if (!w || !w.spawnProjectile || !ctx.holder) return;
-      const n = int(c.count, 1, 6, 3), base = projCfg({ speed: c.speed || 700, damage: c.damage || 6, life: c.life || 2.4, homing: true, r: c.r });
+      const n = int(c.count, 1, 6, 3), base = attach(projCfg({ speed: c.speed || 700, damage: c.damage || 6, life: c.life || 2.4, homing: true, r: c.r }), ctx);
       for (let i = 0; i < n; i++) w.spawnProjectile(ctx.holder, base, ((i / Math.max(1, n - 1)) - 0.5) * 50);
     },
     hazardField(c, ctx) {                     // drop a lingering damage zone at ctx.x,y (env prop)
@@ -216,10 +228,10 @@
     return null;
   }
 
-  // ---- the interpreter: run one TRIGGER's effect list against the world. Safe: unknown ops skipped. ----
-  function run(graph, trigger, ctx) {
-    if (!graph || !graph.on) return 0;
-    const list = graph.on[trigger];
+  // ---- the interpreter ----
+  // runEffects: dispatch a raw effect LIST (used by the engine's collision handlers for on.hit/
+  // on.land, where there's no graph object — just the stamped trigger list). Safe: unknown ops skipped.
+  function runEffects(list, ctx) {
     if (!Array.isArray(list)) return 0;
     let ran = 0;
     for (const eff of list) {
@@ -229,12 +241,19 @@
     }
     return ran;
   }
+  // run: execute one TRIGGER's effect list. Stamps ctx.graph so attach() can propagate hit/land.
+  function run(graph, trigger, ctx) {
+    if (!graph || !graph.on) return 0;
+    ctx = ctx || {};
+    ctx.graph = graph;
+    return runEffects(graph.on[trigger], ctx);
+  }
 
   DS.Graph = {
     EFFECTS: EFFECTS, REACTIONS: REACTIONS, ELEMENTS: ELEMENTS,
     TRIGGERS: TRIGGERS, STATUSES: STATUSES, BUFFS: BUFFS,
     OPS: Object.keys(EFFECTS),
-    run: run, react: react, projCfg: projCfg,
+    run: run, runEffects: runEffects, react: react, projCfg: projCfg,
     isGraph: function (m) { return !!(m && m.on && typeof m.on === 'object'); },
   };
 })(window);

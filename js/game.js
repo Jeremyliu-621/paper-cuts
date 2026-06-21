@@ -69,6 +69,7 @@
         settings: d.settings, platforms: this.stage.platforms, stage: this.stage, view: d.view,
         effects: this.effects, game: this,
         blast: this.blast, bounds: this.bounds,
+        get fighters() { return game.fighters; },   // graph effects (aoe/chain/pull/beam) iterate this
         // reuse one scratch array instead of allocating a filtered copy on every call (called in
         // attack hit-loops). callers iterate the result immediately and never nest opponents() calls.
         _oppScratch: [],
@@ -448,6 +449,10 @@
           if (f === pr.owner || f.dead || f.respawnT > 0 || f.invuln > 0) continue;
           if (Math.abs(f.x - pr.x) < f.w / 2 + pr.r && Math.abs(f.y - pr.y) < f.h / 2 + pr.r) {
             f._takeHit(pr.cfg, pr.vx >= 0 ? 1 : -1, pr.owner, this.world);
+            // graph projectile: run its on.hit (freeze/aoe/chain) on the struck fighter, then on.land
+            // (a bomb explodes on a direct hit too).
+            if (pr.cfg.onHit && DS.Graph) DS.Graph.runEffects(pr.cfg.onHit, { world: this.world, holder: pr.owner, hitTarget: f, x: pr.x, y: pr.y, facing: pr.facing });
+            this._graphLand(pr);
             if (pr.cfg.sniper) { this.effects.ultHit(pr.x, pr.y, 1.5, pr.owner && pr.owner.tagCol); this.effects.hitstop(0.12); } // satisfying snipe
             else this.effects.impact(pr.x, pr.y, 0.8);
             pr.dead = true; struck = true; break;
@@ -459,16 +464,25 @@
           if (!p.pass && pr.x > p.x && pr.x < p.x + p.w && pr.y > p.y && pr.y < p.y + p.h) {
             if (p._hp != null) this.damageBox(p, pr.cfg.damage || 6);
             else if (DS.Audio) DS.Audio.play('fizzle', { x: pr.x });
+            this._graphLand(pr);   // bomb/thrown graph projectile lands on a platform -> on.land (explode)
             this.effects.impact(pr.x, pr.y, 0.4); pr.dead = true; struck = true; break;
           }
         }
         if (struck) continue;
         // ran out of life / left the arena -> gentle shrink-and-fade poof (not a hard cut)
         if (pr.life <= 0 || pr.x < b.left || pr.x > b.right || pr.y < b.top || pr.y > b.bottom) {
+          this._graphLand(pr);   // ran out of life / left the arena -> on.land (timed explosion)
           pr.fade = POOF; pr.vx *= 0.25; pr.vy = pr.vy * 0.25 - 30; // drift up a touch as it dissipates
         }
       }
       this.projectiles = this.projectiles.filter((p) => !p.dead && (p.fade == null || p.fade > 0));
+    }
+
+    // run a graph projectile's on.land effects ONCE, wherever it comes to rest (fighter/platform/life).
+    _graphLand(pr) {
+      if (pr._landed || !pr.cfg || !pr.cfg.onLand || !DS.Graph) return;
+      pr._landed = true;
+      DS.Graph.runEffects(pr.cfg.onLand, { world: this.world, holder: pr.owner, hitTarget: null, x: pr.x, y: pr.y, facing: pr.facing });
     }
 
     // boomerang hammer: flies out (decelerating) to mid range, then homes back to the thrower,

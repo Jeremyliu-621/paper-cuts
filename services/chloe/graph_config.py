@@ -158,3 +158,10 @@ SYSTEM_PROMPT = (
 MECHANIC_ENDPOINT = "/mechanic"
 HEALTH_ENDPOINT = "/healthz"
 PORT = 8500
+
+# ---- drop-in aliases so serve.py can `import graph_config as config` unchanged ----
+BASE_MODEL = "Qwen/Qwen3-0.6B"      # the same student base config.py trains/serves
+NODES = EFFECTS                     # healthz introspection (now the primitive library)
+node_menu = graph_menu             # serve builds the system prompt from this
+clamp_spec = clamp_graph           # serve's safety net (now graph-aware)
+

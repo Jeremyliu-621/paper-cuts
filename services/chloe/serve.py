@@ -49,8 +49,10 @@ import time
 import traceback
 from typing import Any, Optional
 
-# config is the single source of truth (NODES, SYSTEM_PROMPT, node_menu, clamp_spec, serve cfg).
-import config
+# graph_config is the single source of truth for the COMPOSABLE graph contract (mirrors js/graph.js).
+# It exposes drop-in aliases (NODES, node_menu, clamp_spec, BASE_MODEL, SYSTEM_PROMPT, serve cfg) so
+# this server is unchanged below. (For the legacy single-node schema, swap back to `import config`.)
+import graph_config as config
 
 
 # --------------------------------------------------------------------------------------
