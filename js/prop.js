@@ -14,6 +14,7 @@
   const GRAV = 2600;              // prop gravity (px/s^2)
   const MAXFALL = 2200;
   const HOLD_X = 30, HOLD_Y = 6;  // hand offset from the holder's centre
+  const REVEAL_DUR = 0.4;         // seconds the enhanced-sprite reveal animation plays
 
   function Prop(opts) {
     opts = opts || {};
@@ -30,6 +31,8 @@
     this.strokes = opts.strokes || null;                   // placeholder vector strokes (local coords)
     this.sprite = null;                                    // CAELLUM raster (Image), set by DS.AI later
     this.enhanced = false;
+    this._enhancing = false;                               // AI enhance in flight -> show the "magic working" scratch FX
+    this._revealT = -1;                                    // >=0 while the enhanced sprite reveals in (see render)
     this.held = null;                                      // the Fighter carrying it
     this.onGround = false;
     this.cooldown = 0;
@@ -40,6 +43,7 @@
 
   Prop.prototype.update = function (dt, world) {
     this.bornT += dt;
+    if (this._revealT >= 0) this._revealT += dt;           // advance the sprite reveal animation
     if (this.cooldown > 0) this.cooldown -= dt;
 
     if (this.held) {
@@ -85,6 +89,20 @@
       if (world.effects) world.effects.dust(f.x + f.facing * 40, f.y, f.facing);
       return;
     }
+    if (m.kind === 'melee') {
+      // a REAL swing: reuse the fighter's proven melee action machinery so a drawn sword/axe/bat
+      // arcs a hitbox in front of the holder (circle-vs-AABB, knockback, smashes crates) with the
+      // swing pose + whoosh — not a flying projectile. reach->hit.x, the rest carries through.
+      const base = (f.ch && f.ch.actions && f.ch.actions.attack) || { startup: 0, active: 3, recovery: 5 };
+      const reach = m.reach != null ? m.reach : (m.r || 40);
+      const swing = Object.assign({}, base, {
+        hit: { x: reach, y: -4, r: m.r || 32, damage: m.damage || 10,
+          kbBase: m.kbBase || 24, kbScale: m.kbScale || 0.12, angle: m.angle || 10 },
+      });
+      f._startAction('attack', swing);   // 'attack' name -> swing pose + melee whoosh SFX
+      if (world.effects) world.effects.dust(f.x + f.facing * 34, f.y, f.facing);
+      return;
+    }
     if (m.kind === 'ranged') {
       if (world.spawnProjectile) world.spawnProjectile(f, m, aimDeg || 0);
       if (world.effects) world.effects.dust(f.x + f.facing * 40, f.y, f.facing);
@@ -123,15 +141,42 @@
     if (!this.held && this.onGround) ctx.translate(0, Math.sin(this.bornT * 3) * 1.5); // idle bob
     const pop = this.bornT < 0.18 ? this.bornT / 0.18 : 1;                              // spawn pop
     if (pop < 1) ctx.scale(pop, pop);
-    ctx.scale(this.facing, 1);
 
-    if (this.sprite && this.sprite.complete && this.sprite.naturalWidth) {
+    const spriteReady = this.sprite && this.sprite.complete && this.sprite.naturalWidth;
+    const revealing = this._revealT >= 0 && this._revealT < REVEAL_DUR;
+    // reveal: a quick swell as the enhanced sprite first appears (the doodle "becomes real")
+    const swell = revealing ? 1 + 0.2 * Math.sin((this._revealT / REVEAL_DUR) * Math.PI) : 1;
+    ctx.scale(this.facing * swell, swell);
+
+    if (spriteReady) {
       const s = this.spriteSize;
       ctx.drawImage(this.sprite, -s / 2, -s / 2, s, s);
-    } else if (this.strokes && this.strokes.length) {
-      for (const st of this.strokes) D.strokePts(ctx, st.pts, { width: st.w || 5, rnd: this._rnd, jitter: 0.5, passes: 1 });
+      if (revealing) this._scratchFx(ctx, this._revealT * 6, 1 - this._revealT / REVEAL_DUR); // burst out + fade
     } else {
-      D.strokePts(ctx, [[-this.w / 2, -this.h / 2], [this.w / 2, -this.h / 2], [this.w / 2, this.h / 2], [-this.w / 2, this.h / 2]], { width: 5, rnd: this._rnd, closed: true });
+      // the kid's actual drawing plays while the AI works; jitter it a touch harder mid-enhance.
+      if (this.strokes && this.strokes.length) {
+        for (const st of this.strokes) D.strokePts(ctx, st.pts, { width: st.w || 5, rnd: this._rnd, jitter: this._enhancing ? 1.3 : 0.5, passes: 1 });
+      } else {
+        D.strokePts(ctx, [[-this.w / 2, -this.h / 2], [this.w / 2, -this.h / 2], [this.w / 2, this.h / 2], [-this.w / 2, this.h / 2]], { width: 5, rnd: this._rnd, closed: true });
+      }
+      if (this._enhancing) this._scratchFx(ctx, this.bornT, 1);     // "AI is drawing it" working FX
+    }
+    ctx.restore();
+  };
+
+  // a ring of short rough scratch-dashes that orbit + pulse around the drawing — the "doodle is being
+  // sketched into life" effect that masks the enhance latency. t drives the animation, alpha fades it.
+  Prop.prototype._scratchFx = function (ctx, t, alpha) {
+    const R = Math.max(this.w, this.h) * (0.6 + (alpha < 1 ? (1 - alpha) * 0.5 : 0)); // bursts outward on reveal
+    const n = 7;
+    ctx.save();
+    ctx.globalAlpha = 0.55 * alpha;
+    for (let i = 0; i < n; i++) {
+      const a = t * 3.2 + i * (Math.PI * 2 / n);
+      const rr = R * (0.92 + 0.16 * Math.sin(t * 8 + i * 1.7));
+      const cx = Math.cos(a) * rr, cy = Math.sin(a) * rr;
+      const tx = -Math.sin(a), ty = Math.cos(a), L = 6 + 4 * Math.sin(t * 6 + i); // tangential dash
+      D.strokePts(ctx, [[cx - tx * L, cy - ty * L], [cx + tx * L, cy + ty * L]], { width: 3, rnd: this._rnd, jitter: 1.4, passes: 1 });
     }
     ctx.restore();
   };

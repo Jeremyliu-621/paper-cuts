@@ -11,6 +11,10 @@
   'use strict';
   const DS = global.DS;
 
+  // @imgly ML background remover (same lib/version as the camera cutout in campad.js), loaded as an
+  // ESM on demand. Gives a clean salient-object edge on generated sprites; flood-fill is the fallback.
+  const IMGLY_URL = 'https://esm.sh/@imgly/background-removal@1.7.0';
+
   const AI = {
     endpoint: null,   // CAELLUM /enhance URL; null = placeholder only
     falEndpoint: null, // fal /fal-enhance URL; null = no fast pass (CAELLUM-only as before)
@@ -135,55 +139,92 @@
     // that lands after CAELLUM is dropped. fal only marks prop._falDone, never prop.enhanced, so the
     // later CAELLUM swap always wins regardless of arrival order. Never throws into the spawn path.
     _falEnhanceInto: function (prop, image_b64, label) {
-      const self = this;
+      prop._enhancing = true;                                // kick off the "magic working" scratch FX
       fetch(this.falEndpoint, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ image_b64: image_b64, label: label }),
       }).then(function (r) { return r.json(); })
         .then(function (out) {
           if (!out || !out.sprite_b64) throw new Error((out && out.error) || 'no sprite in response');
-          const img = new Image();
-          img.onload = function () {
-            if (prop.enhanced) return;                       // CAELLUM polish already applied -> keep it
-            const sprite = new Image();                      // fal returns a sprite WITH a background; cut it
-            sprite.onload = function () { if (!prop.enhanced) { prop.sprite = sprite; prop._falDone = true; } };
-            sprite.src = self._cutoutBg(img);
+          if (prop.enhanced) { prop._enhancing = false; return; }   // CAELLUM polish already applied -> keep it
+          // the sprite is already a TRANSPARENT PNG (background removed server-side by BiRefNet), so
+          // there's no client-side cutout work — just swap it straight in. No render-thread stall.
+          const sprite = new Image();
+          sprite.onload = function () {
+            if (prop.enhanced) return;
+            prop.sprite = sprite; prop._falDone = true;
+            prop._enhancing = false; prop._revealT = 0;      // stop the FX, play the reveal pop
           };
-          img.src = 'data:image/png;base64,' + out.sprite_b64;
+          sprite.src = 'data:image/png;base64,' + out.sprite_b64;
         })
-        .catch(function (e) { if (global.__showErr) global.__showErr('fal enhance failed: ' + (e && e.message || e)); });
+        .catch(function (e) {
+          prop._enhancing = false;                           // stop the FX; the kid's drawing stays as-is
+          if (global.__showErr) global.__showErr('fal enhance failed: ' + (e && e.message || e));
+        });
     },
 
-    // remove a generated sprite's connected/solid background -> transparent PNG dataURL. Mirrors
-    // CAELLUM's server-side _cutout_bg: flood-fill from the corners/edges within a tolerance, then
-    // mop up near-white / light-grey stragglers. (fal returns sprites on a background; this strips it.)
-    _cutoutBg: function (img) {
-      const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
-      const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-      const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0);
-      let id; try { id = ctx.getImageData(0, 0, W, H); } catch (e) { return cv.toDataURL('image/png'); }
-      const d = id.data, N = W * H, seen = new Uint8Array(N), TH = 78, stack = [];
-      const seeds = [0, W - 1, (H - 1) * W, N - 1, (W >> 1), (H - 1) * W + (W >> 1), (H >> 1) * W, (H >> 1) * W + W - 1];
-      for (let s = 0; s < seeds.length; s++) {
-        const seed = seeds[s]; if (seen[seed]) continue;
-        const sr = d[seed * 4], sg = d[seed * 4 + 1], sb = d[seed * 4 + 2];
-        stack.length = 0; stack.push(seed);
-        while (stack.length) {
-          const i = stack.pop(); if (seen[i]) continue; seen[i] = 1;
-          if (Math.abs(d[i * 4] - sr) > TH || Math.abs(d[i * 4 + 1] - sg) > TH || Math.abs(d[i * 4 + 2] - sb) > TH) continue;
-          d[i * 4 + 3] = 0;
-          const x = i % W, y = (i / W) | 0;
-          if (x > 0) stack.push(i - 1); if (x < W - 1) stack.push(i + 1);
-          if (y > 0) stack.push(i - W); if (y < H - 1) stack.push(i + W);
-        }
-      }
-      for (let i = 0; i < N; i++) {                          // mop up light-grey / near-white leftovers
-        if (d[i * 4 + 3] === 0) continue;
-        const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
-        if ((r + g + b) / 3 > 175 && (Math.max(r, g, b) - Math.min(r, g, b)) < 28) d[i * 4 + 3] = 0;
-      }
-      ctx.putImageData(id, 0, 0);
-      return cv.toDataURL('image/png');
+    // remove a generated sprite's background -> a transparent PNG URL (Promise). Uses the @imgly ML
+    // remover (a real salient-object segmentation, same lib as the camera cutout) for a clean edge on
+    // any background — checkerboard, gradient, scenery. Falls back to the corner flood-fill if the
+    // model can't load. fal/CAELLUM return sprites on a background; this is what makes them blend.
+    _cutoutBg: function (dataUrl) {
+      // FAST path (a few ms): corner flood-fill. The @imgly ML remover (_cutoutBgML) gives a cleaner
+      // edge but runs ONNX on the MAIN THREAD and froze the game for seconds — so it is opt-in ONLY,
+      // never on the gameplay hot path. (A future move: do cutout server-side or in a Web Worker.)
+      return this._cutoutBgFloodfill(dataUrl);
+    },
+
+    // OPT-IN ML cutout via @imgly (clean edge, any background) — but heavy + main-thread. Do NOT call
+    // during a live match; it stalls the render loop. Kept for an offline/preview path.
+    _cutoutBgML: function (dataUrl) {
+      const self = this;
+      return import(/* @vite-ignore */ IMGLY_URL)
+        .then(function (mod) {
+          const removeBackground = mod.removeBackground || (mod.default && mod.default.removeBackground) || mod.default;
+          if (typeof removeBackground !== 'function') throw new Error('removeBackground export not found');
+          return removeBackground(dataUrl, { output: { format: 'image/png' } });
+        })
+        .then(function (blob) { return URL.createObjectURL(blob); })
+        .catch(function () { return self._cutoutBgFloodfill(dataUrl); });
+    },
+
+    // fallback cutout (only if @imgly fails to load): load the dataURL, flood-fill the connected
+    // background from the corners/edges within a tolerance, then mop up near-white / light-grey.
+    // Returns a Promise<dataURL>. Fragile on textured backgrounds — hence @imgly is preferred.
+    _cutoutBgFloodfill: function (dataUrl) {
+      return new Promise(function (resolve) {
+        const img = new Image();
+        img.onerror = function () { resolve(dataUrl); };
+        img.onload = function () {
+          const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
+          const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+          const ctx = cv.getContext('2d'); ctx.drawImage(img, 0, 0);
+          let id; try { id = ctx.getImageData(0, 0, W, H); } catch (e) { resolve(dataUrl); return; }
+          const d = id.data, N = W * H, seen = new Uint8Array(N), TH = 78, stack = [];
+          const seeds = [0, W - 1, (H - 1) * W, N - 1, (W >> 1), (H - 1) * W + (W >> 1), (H >> 1) * W, (H >> 1) * W + W - 1];
+          for (let s = 0; s < seeds.length; s++) {
+            const seed = seeds[s]; if (seen[seed]) continue;
+            const sr = d[seed * 4], sg = d[seed * 4 + 1], sb = d[seed * 4 + 2];
+            stack.length = 0; stack.push(seed);
+            while (stack.length) {
+              const i = stack.pop(); if (seen[i]) continue; seen[i] = 1;
+              if (Math.abs(d[i * 4] - sr) > TH || Math.abs(d[i * 4 + 1] - sg) > TH || Math.abs(d[i * 4 + 2] - sb) > TH) continue;
+              d[i * 4 + 3] = 0;
+              const x = i % W, y = (i / W) | 0;
+              if (x > 0) stack.push(i - 1); if (x < W - 1) stack.push(i + 1);
+              if (y > 0) stack.push(i - W); if (y < H - 1) stack.push(i + W);
+            }
+          }
+          for (let i = 0; i < N; i++) {                          // mop up light-grey / near-white leftovers
+            if (d[i * 4 + 3] === 0) continue;
+            const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+            if ((r + g + b) / 3 > 175 && (Math.max(r, g, b) - Math.min(r, g, b)) < 28) d[i * 4 + 3] = 0;
+          }
+          ctx.putImageData(id, 0, 0);
+          resolve(cv.toDataURL('image/png'));
+        };
+        img.src = dataUrl;
+      });
     },
 
     // POST the label to CHLOE and, on success, UPGRADE the prop's mechanic in place. Progressive
@@ -197,7 +238,9 @@
         body: JSON.stringify(body),
       }).then(function (r) { return r.json(); })
         .then(function (spec) {
-          if (!spec || !spec.node) throw new Error((spec && spec.error) || 'no node in response');
+          // accept BOTH the composable graph format ({name,tags,on:{...}}) and the legacy
+          // single-node spec ({node,params}). Only a missing/empty/error payload is a failure.
+          if (!spec || spec.error || (!spec.node && !spec.on)) throw new Error((spec && spec.error) || 'no mechanic in response');
           const mech = specToMechanic(spec);
           if (mech) {
             prop.mechanic = mech; prop.archetype = mech.archetype;
@@ -337,14 +380,15 @@
     if (node === 'projectile_weapon' || node === 'throwable') {
       return Object.assign({ kind: 'ranged', archetype: node === 'throwable' ? 'throwable' : 'ranged_weapon' }, p);
     }
-    // melee: the spec carries {reach,...} but the engine slash needs {r,speed,life}. Map reach->r and
-    // keep the demo-tuned speed/life so the short fast strike still reads (DS.Mechanics.DEFAULTS).
+    // melee: map the spec's {reach,damage,...} onto the SWING mechanic (an arc hitbox in front of
+    // the holder — DS.Prop.fire runs it through the fighter's melee action, not a projectile).
     if (node === 'melee_weapon') {
       const base = (DS.Mechanics && DS.Mechanics.DEFAULTS && DS.Mechanics.DEFAULTS.melee_weapon) || {};
-      return Object.assign({}, base, p, {
-        kind: 'ranged', archetype: 'melee_weapon',
-        r: p.reach != null ? p.reach : base.r,
-        speed: base.speed, life: base.life, gravity: base.gravity || 0,
+      return Object.assign({}, base, {
+        kind: 'melee', archetype: 'melee_weapon',
+        reach: p.reach != null ? p.reach : base.reach,
+        damage: p.damage != null ? p.damage : base.damage,
+        r: p.r != null ? p.r : base.r,
       });
     }
     if (node === 'heal') return { kind: 'heal', archetype: 'heal', amount: p.amount, cooldown: 0 };

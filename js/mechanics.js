@@ -31,7 +31,7 @@
   const DEFAULTS = {
     ranged_weapon: { kind: 'ranged', speed: 1150, damage: 7, kbBase: 22, kbScale: 0.09, angle: 0, gravity: 0, life: 1.3, r: 13, cooldown: 0.30 },
     throwable:     { kind: 'ranged', speed: 760, damage: 15, kbBase: 44, kbScale: 0.17, angle: 22, gravity: 1500, life: 2.2, r: 20, cooldown: 0.70 },
-    melee_weapon:  { kind: 'ranged', speed: 900, damage: 12, kbBase: 34, kbScale: 0.13, angle: 6, gravity: 0, life: 0.12, r: 30, cooldown: 0.34 }, // short fast "slash"
+    melee_weapon:  { kind: 'melee', reach: 52, r: 34, damage: 12, kbBase: 30, kbScale: 0.13, angle: 10, cooldown: 0.30 }, // a real swing — arc hitbox in front of the holder (DS.Prop.fire)
     heal:          { kind: 'heal', amount: 30, cooldown: 0 },
     buff:          { kind: 'buff', effect: 'invuln', dur: 5, cooldown: 0 },
     hazard:        { kind: 'hazard', damage: 10, cooldown: 0 },     // (environment placement — Track B)

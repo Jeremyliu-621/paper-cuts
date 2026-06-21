@@ -92,12 +92,18 @@
       }
       if (w.effects) w.effects.smear(ctx.x, ctx.y, dx * range, dy * range);
     },
-    melee(c, ctx) {                           // short fast arc strike — its OWN ranges (a slash, not a flying shot)
-      const w = ctx.world; if (!w || !w.spawnProjectile || !ctx.holder) return;
-      w.spawnProjectile(ctx.holder, {
-        speed: 900, life: 0.12, gravity: 0, r: num(c.reach, 30, 90, 50), damage: num(c.damage, 0, 30, 12),
-        kbBase: num(c.kbBase, 0, 80, 34), kbScale: num(c.kbScale, 0.02, 0.35, 0.13), angle: num(c.angle, -20, 60, 6),
-      }, ctx.aimDeg || 0);
+    melee(c, ctx) {                           // a REAL swing: arc hitbox IN FRONT of the holder (not a flying shot).
+      const w = ctx.world, f = ctx.holder;    // reuses the fighter's melee action (pose + whoosh + crate-smash).
+      if (!f || typeof f._startAction !== 'function') return;
+      const base = (f.ch && f.ch.actions && f.ch.actions.attack) || { startup: 0, active: 3, recovery: 5 };
+      const swing = Object.assign({}, base, {
+        hit: { x: num(c.reach, 30, 90, 52), y: -4, r: num(c.r, 20, 70, 34), damage: num(c.damage, 0, 30, 12),
+          kbBase: num(c.kbBase, 0, 80, 30), kbScale: num(c.kbScale, 0.02, 0.35, 0.13), angle: num(c.angle, -20, 60, 10) },
+      });
+      f._startAction('attack', swing);        // 'attack' name -> swing pose + melee whoosh
+      if (w && w.effects) w.effects.dust(f.x + f.facing * 34, f.y, f.facing);
+      // NOTE: on.hit element effects (e.g. freeze-on-hit) aren't yet propagated through a swing hitbox —
+      // they ride projectiles via attach(). A status-on-melee weapon would need the hit loop to run them.
     },
     // -- area / radial ---------------------------------------------------------------------
     aoe(c, ctx) {                             // radial burst at ctx.x,y: hit nearby fighters

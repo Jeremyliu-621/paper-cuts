@@ -22,12 +22,21 @@ const PORT = process.env.PORT || 8080;
 const MAX_PLAYERS = 6;
 
 // ---- fal.ai enhance proxy config ----------------------------------------
-// fast-sdxl-controlnet-canny (text-to-image): turns the rough black-on-white
-// scribble (fed as the canny control image) + a label-derived prompt into a
-// flat-cartoon doodle icon. Sync endpoint; ~couple-second budget.
-const FAL_MODEL = 'fal-ai/fast-sdxl-controlnet-canny';
-const FAL_URL = `https://fal.run/${FAL_MODEL}`;
+// PIPELINE (default 'recraft'): the kid's rough drawing -> Recraft V3 image-to-image (a clean,
+// CONSISTENT illustration style that LEVELS UP the doodle into a real game sprite while still
+// following its shape) -> BiRefNet background removal (a real ML cutout, run SERVER-SIDE so it never
+// stalls the browser render loop) -> transparent PNG. Set FAL_PIPELINE=sdxl for the old canny path.
+const FAL_PIPELINE = (process.env.FAL_PIPELINE || 'recraft').toLowerCase();
+const FAL_GEN_MODEL = 'fal-ai/recraft/v3/image-to-image';
+const FAL_RMBG_MODEL = 'fal-ai/birefnet/v2';
+// Recraft style + how far it may stray from the kid's drawing (0 = identical .. 1 = ignore it).
+// digital_illustration/hand_drawn fits the doodle world; vector_illustration/bold_stroke is flatter.
+// Both are env-tunable so we can dial the look without code edits.
+const FAL_STYLE = process.env.FAL_STYLE || 'digital_illustration/hand_drawn';
+const FAL_STRENGTH = Number(process.env.FAL_STRENGTH || 0.55);
 const FAL_TIMEOUT_MS = 60000;
+// legacy fallback: fast-sdxl-controlnet-canny (FAL_PIPELINE=sdxl)
+const FAL_SDXL_MODEL = 'fal-ai/fast-sdxl-controlnet-canny';
 const FAL_NEG_PROMPT =
   'realistic, photo, photograph, 3d, render, detailed, shading, gradient, texture, ' +
   'noise, busy background, scenery, shadow, reflection, blurry, watermark, text, signature';
@@ -46,11 +55,17 @@ function falKey() {
   return null;
 }
 
-// Build the positive prompt from the label (mirrors caellum config.prompt_for).
+// Recraft target prompt — the STYLE param carries the look, so the prompt just names the subject
+// and asks for a clean, single, game-ready sprite.
+function recraftPrompt(label) {
+  return `a ${label}, single clean 2D game sprite, bold confident outline, flat bright colors, ` +
+    `centered, full object in frame, plain white background, no text, no sparkles, ` +
+    `no decorations, no extra marks, nothing in the background`;
+}
+// Legacy SDXL prompt (FAL_PIPELINE=sdxl).
 function falPrompt(label) {
-  return `a simple flat cartoon doodle icon of a ${label}, thick bold black outline, minimal, ` +
-    `hand-drawn sticker, flat solid colors, no shading, single object centered on a plain ` +
-    `solid white background`;
+  return `a very simple minimal flat doodle of a ${label}, single thick black marker outline, ` +
+    `two flat colors, no shading, no detail, childlike, centered, plain white background`;
 }
 
 // Read a request body up to a sane cap, parse as JSON.
@@ -75,7 +90,35 @@ function sendJson(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
-// POST /fal-enhance — { image_b64, label } -> { sprite_b64 } (mirrors CAELLUM /enhance).
+// POST a fal model and return its parsed JSON (throws a descriptive error on a non-2xx).
+async function falPost(model, payload, key, signal) {
+  const r = await fetch(`https://fal.run/${model}`, {
+    method: 'POST',
+    headers: { 'Authorization': `Key ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!r.ok) {
+    const detail = await r.text().catch(() => '');
+    const e = new Error(`${model} failed (${r.status}) ${detail.slice(0, 300)}`);
+    e.status = r.status;
+    throw e;
+  }
+  return r.json();
+}
+
+// Fetch an image URL (hosted or data URI) and return it as base64.
+async function fetchB64(url, signal) {
+  const r = await fetch(url, { signal });
+  if (!r.ok) throw new Error(`fetching image failed (${r.status})`);
+  return Buffer.from(await r.arrayBuffer()).toString('base64');
+}
+
+// POST /fal-enhance — { image_b64, label } -> { sprite_b64 }.
+// Stage 1: generate a clean game sprite from the kid's drawing (Recraft i2i, or SDXL canny).
+// Stage 2: remove the background server-side (BiRefNet) so the client gets a TRANSPARENT sprite and
+// never has to run a cutout model on its render thread. Cutout is best-effort: if it fails we still
+// return the generated sprite rather than failing the whole enhance.
 async function falEnhance(req, res) {
   const key = falKey();
   if (!key) return sendJson(res, 500, { error: 'FAL_KEY not configured (env or .env)' });
@@ -95,39 +138,37 @@ async function falEnhance(req, res) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FAL_TIMEOUT_MS);
   try {
-    const falRes = await fetch(FAL_URL, {
-      method: 'POST',
-      headers: { 'Authorization': `Key ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        prompt: falPrompt(label),
-        negative_prompt: FAL_NEG_PROMPT,
-        control_image_url: dataUri,
-        controlnet_conditioning_scale: 0.6,
-        guidance_scale: 6.0,
-        num_inference_steps: 25,
-        image_size: 'square',
-        num_images: 1,
-        enable_safety_checker: false,
-      }),
-      signal: ctrl.signal,
-    });
-
-    if (!falRes.ok) {
-      const detail = await falRes.text().catch(() => '');
-      return sendJson(res, 502, { error: `fal request failed (${falRes.status})`, detail: detail.slice(0, 500) });
+    // --- stage 1: generate ---
+    let genUrl;
+    if (FAL_PIPELINE === 'sdxl') {
+      const out = await falPost(FAL_SDXL_MODEL, {
+        prompt: falPrompt(label), negative_prompt: FAL_NEG_PROMPT, control_image_url: dataUri,
+        controlnet_conditioning_scale: 0.45, guidance_scale: 6.5, num_inference_steps: 30,
+        image_size: 'square', num_images: 1, enable_safety_checker: false,
+      }, key, ctrl.signal);
+      genUrl = out && out.images && out.images[0] && out.images[0].url;
+    } else {
+      const out = await falPost(FAL_GEN_MODEL, {
+        image_url: dataUri, prompt: recraftPrompt(label), strength: FAL_STRENGTH, style: FAL_STYLE,
+      }, key, ctrl.signal);
+      genUrl = out && out.images && out.images[0] && out.images[0].url;
     }
-    const out = await falRes.json();
-    const imgUrl = out && out.images && out.images[0] && out.images[0].url;
-    if (!imgUrl) return sendJson(res, 502, { error: 'fal returned no image' });
+    if (!genUrl) return sendJson(res, 502, { error: 'fal returned no image' });
 
-    // image url may itself be a data URI or a hosted url; fetch + re-encode to base64 PNG
-    const imgRes = await fetch(imgUrl, { signal: ctrl.signal });
-    if (!imgRes.ok) return sendJson(res, 502, { error: `fetching fal image failed (${imgRes.status})` });
-    const sprite_b64 = Buffer.from(await imgRes.arrayBuffer()).toString('base64');
+    // --- stage 2: background removal (server-side, best-effort) ---
+    let spriteUrl = genUrl;
+    try {
+      const cut = await falPost(FAL_RMBG_MODEL, {
+        image_url: genUrl, output_format: 'png', refine_foreground: true,
+      }, key, ctrl.signal);
+      if (cut && cut.image && cut.image.url) spriteUrl = cut.image.url;
+    } catch (e) { /* keep the un-cut sprite rather than failing the whole enhance */ }
+
+    const sprite_b64 = await fetchB64(spriteUrl, ctrl.signal);
     return sendJson(res, 200, { sprite_b64 });
   } catch (e) {
     if (e && e.name === 'AbortError') return sendJson(res, 504, { error: 'fal request timed out' });
-    return sendJson(res, 500, { error: `fal enhance failed: ${(e && e.message) || e}` });
+    return sendJson(res, 502, { error: `fal enhance failed: ${(e && e.message) || e}` });
   } finally {
     clearTimeout(timer);
   }
