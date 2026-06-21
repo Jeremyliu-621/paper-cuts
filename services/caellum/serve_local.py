@@ -19,6 +19,7 @@ Bonus: the Colab-trained CAELLUM LoRA drops straight in at RUNTIME via --lora (n
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from typing import Optional
 
@@ -137,14 +138,25 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=config.PORT)
     ap.add_argument("--device", default="auto", choices=["auto", "mps", "cuda", "cpu"])
     ap.add_argument("--dtype", default="auto", choices=["auto", "float16", "float32"])
-    ap.add_argument("--lora", default=None, help="dir with a trained CAELLUM LoRA (loaded at runtime, no fuse)")
+    ap.add_argument("--lora", default="auto",
+                    help="trained CAELLUM LoRA dir (runtime, no fuse). 'auto' = use ../../caellum_lora_out "
+                         "if present; 'none' = stock SD1.5; or pass a path.")
     ap.add_argument("--no-warm", action="store_true")
     args = ap.parse_args()
+
+    # resolve --lora: auto-load the repo's caellum_lora_out when it exists, so a plain run is styled.
+    lora = args.lora
+    if lora == "auto":
+        cand = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "caellum_lora_out")
+        lora = cand if os.path.isfile(os.path.join(cand, "pytorch_lora_weights.safetensors")) else None
+        print(f"[serve-local] --lora auto -> {'using ' + cand if lora else 'none found (stock SD1.5)'}")
+    elif lora in ("none", "off", ""):
+        lora = None
 
     DEVICE = pick_device(args.device)
     # MPS/CPU are most reliable in float32; CUDA is fast in float16.
     dtype_name = args.dtype if args.dtype != "auto" else ("float16" if DEVICE == "cuda" else "float32")
-    PIPE = load_pipeline(DEVICE, dtype_name, args.lora)
+    PIPE = load_pipeline(DEVICE, dtype_name, lora)
     if not args.no_warm:
         prewarm()
 
